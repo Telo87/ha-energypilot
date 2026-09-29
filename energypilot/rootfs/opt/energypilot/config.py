@@ -78,6 +78,9 @@ DEFAULT_SETTINGS: dict = {
     },
     # ev / heater: measured separately and subtracted from the house consumption
     "sensors": {"house": "", "grid": "", "battery_soc": "", "battery_power": "", "ev": "", "heater": ""},
+    # flip the sign of a sensor – EnergyPilot expects: house consumption positive,
+    # grid positive = import, battery positive = charging
+    "invert": {"house": False, "grid": False, "battery_power": False},
     "backfill_days": 90,
     # home battery for the planner (sonnenBatterie etc.)
     "battery": {
@@ -274,6 +277,11 @@ class Settings:
                 for key, hi in (("markup_ct", 200), ("vat", 50), ("feed_in_ct", 100)):
                     if key in tariff:
                         t[key] = _num(tariff[key], t[key], 0, hi)
+            inv = values.get("invert")
+            if isinstance(inv, dict):
+                for key in DEFAULT_SETTINGS["invert"]:
+                    if key in inv:
+                        self.data["invert"][key] = bool(inv[key])
             sensors = values.get("sensors")
             if isinstance(sensors, dict):
                 for key in DEFAULT_SETTINGS["sensors"]:

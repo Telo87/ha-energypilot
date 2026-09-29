@@ -73,3 +73,21 @@ def test_base_load_subtracts_ev_and_heater(tmp_path):
     assert hub.base_load(acts) == {0: 800.0, 3600: 500.0}  # hour without EV value is left out
     negative = {k: {t: -v for t, v in d.items()} if k == "house" else d for k, d in acts.items()}
     assert hub.base_load(negative) == {0: 800.0, 3600: 500.0}  # inverter reports consumption negative
+
+
+def test_live_values_respect_invert(tmp_path):
+    import asyncio
+
+    class FakeHA:
+        available = True
+
+        async def state(self, entity):
+            return {"state": "-0.74", "attributes": {"unit_of_measurement": "kW"}}
+
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"sensors": {"battery_power": "sensor.sonnen_power", "grid": "sensor.netz"},
+                     "invert": {"battery_power": True}})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), FakeHA())
+    asyncio.run(hub.read_live())
+    assert hub.live["values"]["battery_power"]["value"] == 740  # sign flipped (-0.74 kW -> +740 W)
+    assert hub.live["values"]["grid"]["value"] == -740  # not inverted

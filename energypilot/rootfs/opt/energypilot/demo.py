@@ -24,7 +24,7 @@ SOURCES = {
 LIVE_SOURCES = {"fs"}  # only collected live: starts 10 days ago
 
 
-def demo_entities() -> list[dict]:
+def demo_entities(hub=None) -> list[dict]:
     rows = [
         ("sensor.wechselrichter_1_ac_leistung", "Wechselrichter 1 AC-Leistung", "W", "power"),
         ("sensor.wechselrichter_2_ac_leistung", "Wechselrichter 2 AC-Leistung", "W", "power"),
@@ -34,8 +34,9 @@ def demo_entities() -> list[dict]:
         ("sensor.batterie_ladezustand", "Batterie Ladezustand", "%", "percent"),
         ("sensor.batterie_leistung", "Batterie Leistung", "W", "power"),
     ]
+    live = {v["entity"]: v["value"] for v in ((hub.live if hub else {}).get("values") or {}).values()}
     return [
-        {"entity_id": e, "name": n, "unit": u, "kind": k, "state": "0", "statistics": True}
+        {"entity_id": e, "name": n, "unit": u, "kind": k, "state": str(live.get(e, 0)), "statistics": True}
         for e, n, u, k in rows
     ]
 

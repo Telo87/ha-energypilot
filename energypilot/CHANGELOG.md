@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Neu: **Richtung umkehren** für Hausverbrauch, Netzleistung und Batterie-Leistung (Einstellungen › Sensoren) – z. B. für die sonnenBatterie, die Entladen positiv meldet. Darunter steht sofort, wie EnergyPilot den aktuellen Wert versteht („Batterie entlädt mit 737 W“)
+- Unter jedem gewählten Sensor wird der **aktuelle Zustand** angezeigt
+- Behoben: Batterie wurde als „lädt“ angezeigt, obwohl sie entlädt (fehlende Vorzeichen-Einstellung)
+
 ## 0.3.1
 
 - Neu: **Kontrolle** unter Einstellungen › Sensoren – Durchschnitt pro Tag der letzten 7 Tage für Hausverbrauch, E-Auto, Heizstab und den daraus berechneten Grundverbrauch, mit Hinweis auf Lücken; zum Prüfen, ob die Sensoren richtig gewählt sind

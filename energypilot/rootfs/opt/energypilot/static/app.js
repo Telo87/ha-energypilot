@@ -836,6 +836,10 @@
      it with .value like a select. An entity that is not in the list can be
      typed in directly (e.g. sensor.xyz) and confirmed with Enter. */
   const ENTITY_RE = /^[a-z_]+\.[a-z0-9_]+$/;
+  const entState = (list, v) => {
+    const e = list.find((x) => x.entity_id === v);
+    return `${esc(v)}${e ? ` · <b>aktuell ${esc(e.state)} ${esc(e.unit || '')}</b>` : ''}`;
+  };
   function entityPicker(id, list, value, kinds) {
     const cur = list.find((e) => e.entity_id === value);
     return `<div class="ent-pick" data-kinds="${kinds.join(',')}">
@@ -844,7 +848,7 @@
         <input class="input ent-q" type="text" autocomplete="off" spellcheck="false" placeholder="Name oder Entität suchen …" value="${esc(cur ? cur.name : value || '')}" aria-label="Sensor suchen">
         <button type="button" class="icon-btn ent-clear ${value ? '' : 'hidden'}" title="Auswahl entfernen">${ic('x')}</button>
         <button type="button" class="icon-btn ent-open" title="Liste öffnen">${ic('chevronDown')}</button></div>
-      <div class="ent-id mono ${value ? '' : 'hidden'}">${esc(value || '')}</div>
+      <div class="ent-id mono ${value ? '' : 'hidden'}">${value ? entState(list, value) : ''}</div>
       <div class="ent-list hidden" role="listbox"></div></div>`;
   }
   function bindPickers(root, list) {
@@ -859,7 +863,7 @@
       const label = (v) => { const e = list.find((x) => x.entity_id === v); return e ? e.name : v; };
       const set = (v) => {
         hidden.value = v; q.value = v ? label(v) : '';
-        idLine.textContent = v; idLine.classList.toggle('hidden', !v); clear.classList.toggle('hidden', !v);
+        idLine.innerHTML = v ? entState(list, v) : ''; idLine.classList.toggle('hidden', !v); clear.classList.toggle('hidden', !v);
         close();
         hidden.dispatchEvent(new Event('change', { bubbles: true }));
       };
@@ -1114,14 +1118,16 @@
   async function renderSensors(el) {
     setHeader('Einstellungen', 'Sensoren für Live-Werte und spätere Optimierung');
     let ents = [];
-    try { ents = await loadEntities(); } catch (e) { toast(`Sensoren konnten nicht geladen werden: ${e.message}`, 'err'); }
+    try { ents = await loadEntities(true); } catch (e) { toast(`Sensoren konnten nicht geladen werden: ${e.message}`, 'err'); }
     const s = S.settings.sensors; const loc = S.settings.location; const ha = S.settings.ha_location;
+    const inv = S.settings.invert || {};
+    const invBox = (key) => `<label class="check inv"><input type="checkbox" id="inv_${key}" ${inv[key] ? 'checked' : ''}>Richtung umkehren</label><div class="dir-line" id="dir_${key}"></div>`;
     el.innerHTML = `<div class="grid cols-2">
       <div class="card"><div class="card-head"><div class="avatar accent">${ic('sliders')}</div><h2>Sensoren</h2></div><div class="card-body">
-        <div class="field"><label>Hausverbrauch</label>${entityPicker('n_house', ents, s.house, ['power', 'energy'])}<span class="hint">Gesamtverbrauch des Hauses (inklusive E-Auto und Heizstab) – Grundlage der Verbrauchsprognose</span></div>
-        <div class="field"><label>Netzleistung</label>${entityPicker('n_grid', ents, s.grid, ['power'])}<span class="hint">Vom Smartmeter: positiv = Bezug, negativ = Einspeisung</span></div>
+        <div class="field"><label>Hausverbrauch</label>${entityPicker('n_house', ents, s.house, ['power', 'energy'])}${invBox('house')}<span class="hint">Gesamtverbrauch des Hauses (inklusive E-Auto und Heizstab) – Grundlage der Verbrauchsprognose. Erwartet wird ein positiver Wert.</span></div>
+        <div class="field"><label>Netzleistung</label>${entityPicker('n_grid', ents, s.grid, ['power'])}${invBox('grid')}<span class="hint">Vom Smartmeter. EnergyPilot erwartet: positiv = Bezug, negativ = Einspeisung – sonst „Richtung umkehren“ anhaken.</span></div>
         <div class="field"><label>Batterie Ladezustand</label>${entityPicker('n_soc', ents, s.battery_soc, ['percent'])}</div>
-        <div class="field"><label>Batterie Leistung</label>${entityPicker('n_bp', ents, s.battery_power, ['power'])}<span class="hint">positiv = Laden, negativ = Entladen</span></div>
+        <div class="field"><label>Batterie Leistung</label>${entityPicker('n_bp', ents, s.battery_power, ['power'])}${invBox('battery_power')}<span class="hint">EnergyPilot erwartet: positiv = Laden, negativ = Entladen. Die sonnenBatterie meldet es meist umgekehrt – dann „Richtung umkehren“ anhaken.</span></div>
         <div class="field"><label>E-Auto / Wallbox</label>${entityPicker('n_ev', ents, s.ev || '', ['power', 'energy'])}<span class="hint">Ladeleistung oder Ladezähler, z. B. aus evcc</span></div>
         <div class="field"><label>Heizstab</label>${entityPicker('n_heater', ents, s.heater || '', ['power', 'energy'])}<span class="hint">E-Auto und Heizstab werden vom Hausverbrauch abgezogen – die Verbrauchsprognose lernt nur den Grundverbrauch, die beiden plant EnergyPilot später gezielt.</span></div>
       </div></div>
@@ -1134,10 +1140,34 @@
       <div class="row" style="margin-top:16px"><button class="btn primary" id="n_save">${ic('check')}Speichern</button></div>
       <div class="card" style="margin-top:16px" id="consCheck"></div>`;
     bindPickers(el, ents);
+    // what EnergyPilot makes of the current value – updates when the entity or the checkbox changes
+    const DIR = { house: 'n_house', grid: 'n_grid', battery_power: 'n_bp' };
+    const watts = (e) => { const v = parseFloat(e.state); if (!Number.isFinite(v)) return null; return e.unit === 'kW' ? v * 1000 : e.unit === 'MW' ? v * 1e6 : v; };
+    const explain = (key) => {
+      const line = $(`#dir_${key}`); const id = $(`#${DIR[key]}`).value;
+      const e = ents.find((x) => x.entity_id === id);
+      const box = $(`#inv_${key}`);
+      box.closest('.inv').classList.toggle('hidden', !id);
+      if (!e || e.kind !== 'power') { line.innerHTML = ''; return; }
+      let w = watts(e);
+      if (w == null) { line.innerHTML = '<span class="faint">kein aktueller Wert</span>'; return; }
+      if (box.checked) w = -w;
+      const a = fmtW(Math.abs(w));
+      const txt = key === 'grid' ? (w > 20 ? `Netzbezug ${a}` : w < -20 ? `Einspeisung ${a}` : 'ausgeglichen')
+        : key === 'battery_power' ? (w > 20 ? `Batterie lädt mit ${a}` : w < -20 ? `Batterie entlädt mit ${a}` : 'Batterie im Ruhezustand')
+          : (w >= 0 ? `Hausverbrauch ${a}` : `<span class="pos">negativer Verbrauch (${fmtW(w)}) – Richtung umkehren?</span>`);
+      line.innerHTML = `→ EnergyPilot versteht: <b>${txt}</b>`;
+    };
+    Object.keys(DIR).forEach((key) => {
+      $(`#inv_${key}`).addEventListener('change', () => explain(key));
+      $(`#${DIR[key]}`).addEventListener('change', () => explain(key));
+      explain(key);
+    });
     consumptionCheck($('#consCheck'));
     $('#n_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({
       sensors: { house: $('#n_house').value, grid: $('#n_grid').value, battery_soc: $('#n_soc').value, battery_power: $('#n_bp').value, ev: $('#n_ev').value, heater: $('#n_heater').value },
       location: { latitude: $('#n_lat').value, longitude: $('#n_lon').value },
+      invert: { house: $('#inv_house').checked, grid: $('#inv_grid').checked, battery_power: $('#inv_battery_power').checked },
     })));
   }
 

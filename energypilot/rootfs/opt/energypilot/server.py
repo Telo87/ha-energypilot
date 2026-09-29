@@ -213,7 +213,7 @@ async def entities(request: web.Request) -> web.Response:
     if hub.options.demo:
         from .demo import demo_entities
 
-        return _ok(demo_entities())
+        return _ok(demo_entities(hub))
     states = await hub.ha.states()
     out = []
     for st in states:

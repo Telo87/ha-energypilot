@@ -619,3 +619,7 @@ svg.i.flip { transform: scaleX(-1); }
 .content > .card + .grid.kpis, .content > .notice + .grid { margin-top: 16px; }
 .badge svg.i { width: 12px; height: 12px; }
 .table.compact td, .table.compact th { padding: 8px 10px; }
+.ent-id b { font-family: var(--font); font-weight: 600; color: var(--text-2); }
+.check.inv { margin-top: 6px; font-size: 13px; }
+.dir-line { font-size: 12.5px; color: var(--text-2); margin-top: 2px; }
+.dir-line:empty { display: none; }

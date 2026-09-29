@@ -449,6 +449,8 @@ class Hub:
         sensors = self.settings.data["sensors"]
         extra = [k for k in ("ev", "heater") if sensors.get(k)]
         sign = {k: -1.0 if sum(acts.get(k, {}).values()) < 0 else 1.0 for k in ("house", *extra)}
+        if self.settings.data["invert"].get("house"):
+            sign["house"] = -1.0
         out = {}
         for t, house in acts.get("house", {}).items():
             parts = [acts.get(k, {}).get(t) for k in extra]
@@ -768,6 +770,8 @@ class Hub:
         values = {}
         for (key, entity), st in zip(wanted.items(), states, strict=True):
             values[key] = _live_value(key, entity, st)
+            if self.settings.data["invert"].get(key) and values[key]["value"] is not None:
+                values[key]["value"] = -values[key]["value"]
         self.live = {"at": int(time.time()), "values": values}
 
     # ------------------------------------------------------------------- views
