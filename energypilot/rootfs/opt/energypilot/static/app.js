@@ -187,6 +187,23 @@
     const a = Math.abs(w);
     return a >= 1000 ? `${nf(w / 1000, a >= 10000 ? 1 : 2)} kW` : `${nf(w)} W`;
   }
+  function fmtDur(h) {
+    if (h == null) return '–';
+    if (h >= 48) return `${nf(h / 24, 1)} Tage`;
+    const m = Math.round(h * 60);
+    return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`;
+  }
+  // "heute 18:40", "morgen 06:15", "Do 07:00"
+  function fmtWhen(ts, isEnd = false) {
+    if (!ts) return '–';
+    let d = new Date(ts * 1000);
+    const midnight = isEnd && d.getHours() === 0 && d.getMinutes() === 0;
+    if (midnight) d = new Date((ts - 60) * 1000);  // 00:00 is shown as 24:00 of the day before
+    const day = localDay(d); const today = localDay();
+    const pre = day === today ? 'heute' : day === shiftDay(today, 1) ? 'morgen' : d.toLocaleDateString('de-DE', { weekday: 'short' });
+    return `${pre} ${midnight ? '24:00' : fmtTime(d)}`;
+  }
+  const MODE = { normal: ['Eigenverbrauch', 'home', 'ok'], hold: ['Akku halten', 'battery', 'warn'], charge: ['Aus dem Netz laden', 'plug', 'accent'] };
   const kwh = (v, d = 1) => (v == null ? '–' : `${nf(v, d)} kWh`);
   const pct = (v, d = 1) => (v == null ? '–' : `${nf(v, d)} %`);
   const signed = (v, d = 1) => (v == null ? '–' : `${v > 0 ? '+' : v < 0 ? '−' : '±'}${nf(Math.abs(v), d)}`);
@@ -234,8 +251,8 @@
     const pad = { l: 56, r: 10, t: 14, b: 26 };
     // axis: a "nice" step (1/2/2.5/5·10ⁿ) for about four gridlines, ends just above the data
     const hi = Math.max(0, ...vals); const lo = Math.min(0, ...vals);
-    const stepV = niceMax(Math.max(hi - lo, 1e-9) / 4);
-    const max = Math.max(stepV, Math.ceil((hi * 1.02) / stepV) * stepV);
+    const stepV = c.maxY ? niceMax(c.maxY / 4) : niceMax(Math.max(hi - lo, 1e-9) / 4);
+    const max = c.maxY || Math.max(stepV, Math.ceil((hi * 1.02) / stepV) * stepV);
     const min = lo < 0 ? Math.floor((lo * 1.02) / stepV) * stepV : 0;
     const cw = (W - pad.l - pad.r) / n;
     const x = (i) => pad.l + i * cw;
@@ -323,7 +340,7 @@
     if (stored) return new Set(stored.filter((s) => all.includes(s)));
     // first visit: show the three most accurate sources
     const top = (ranking && ranking.length ? ranking : all).slice(0, 3);
-    return new Set(all.filter((s) => !top.includes(s)));
+    return new Set(all.filter((s) => !top.includes(s) && !s.startsWith('load:')));  // consumption stays visible
   }
   function toggleHidden(key) {
     const cur = new Set(store.get('hidden', null) || []);
@@ -339,6 +356,7 @@
   // ------------------------------------------------------------------ pages
   const PAGES = [
     { id: 'dashboard', title: 'Übersicht', icon: 'grid', section: 'Energie' },
+    { id: 'plan', title: 'Planung', icon: 'battery' },
     { id: 'accuracy', title: 'Prognose-Check', icon: 'target' },
     { id: 'day', title: 'Tagesverlauf', icon: 'chart' },
     { id: 'prices', title: 'Strompreise', icon: 'euro' },
@@ -420,7 +438,7 @@
 
   // -------------------------------------------------------------- dashboard
   async function renderDashboard(el, token) {
-    let day = null; let tomorrow = null; let lastDayLoad = 0; let drawn = false;
+    let day = null; let tomorrow = null; let loadDay = null; let loadTomorrow = null; let lastDayLoad = 0; let drawn = false;
     const load = async () => {
       const ov = await api('overview');
       if (stale(token)) return;
@@ -428,7 +446,8 @@
       if (!ov.arrays.length) { setHeader('Übersicht'); welcome(el); return; }
       if (Date.now() - lastDayLoad > 5 * 60000) {
         const today = localDay();
-        [day, tomorrow] = await Promise.all([api(`day?day=${today}`), api(`day?day=${shiftDay(today, 1)}`)]);
+        [day, tomorrow, loadDay, loadTomorrow] = await Promise.all([api(`day?day=${today}`), api(`day?day=${shiftDay(today, 1)}`),
+          ov.load ? api(`day?day=${today}&series=base`) : null, ov.load ? api(`day?day=${shiftDay(today, 1)}&series=base`) : null]);
         lastDayLoad = Date.now();
         if (stale(token)) return;
       }
@@ -445,6 +464,7 @@
       const grid = val('grid'); const soc = val('battery_soc'); const bp = val('battery_power');
       const best = ov.forecasts.find((f) => f.source === ov.best) || ov.forecasts.find((f) => f.source === 'om:best_match');
       const pr = ov.price;
+      const plan = ov.plan; const rt = plan && plan.runtime;
       const todayPrices = ov.prices.filter((s) => s.ts < dayTs(shiftDay(localDay(), 1)));
       const avg = todayPrices.length ? todayPrices.reduce((a, s) => a + s.price, 0) / todayPrices.length : null;
       const missing = (k) => '<span class="faint">Sensor in den Einstellungen wählen</span>';
@@ -455,21 +475,24 @@
         kpi('pv', 'solar', 'warn', 'PV-Leistung', w('pv', pvNow), wu(pvNow), pvVals.length ? ov.arrays.map((a) => `${esc(a.name)} ${fmtW(val(`pv:${a.id}`))}`).join(' · ') : missing()),
         kpi('house', 'home', '', 'Hausverbrauch', w('house', val('house')), wu(val('house')), lv.house ? (ov.load ? `Grundverbrauch heute ~${nf(ov.load.today, 1)} kWh · morgen ~${nf(ov.load.tomorrow, 1)} kWh` : 'aktuell') : missing()),
         kpi('grid', 'plug', grid != null && grid < 0 ? 'ok' : '', grid != null && grid < 0 ? 'Einspeisung' : 'Netzbezug', w('grid', grid == null ? null : Math.abs(grid)), wu(grid), lv.grid ? (grid > 0 ? 'Strom wird gekauft' : grid < 0 ? 'Überschuss geht ins Netz' : 'ausgeglichen') : missing()),
-        kpi('batt', 'battery', 'ok', 'Batterie', soc == null ? '–' : cnt('soc', nf(soc, 0)), soc == null ? '' : '%', bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'),
+        kpi('batt', 'battery', 'ok', 'Batterie', soc == null ? '–' : cnt('soc', nf(soc, 0)), soc == null ? '' : '%', `${bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'}${rt ? ` · ${rt.empty_at ? `reicht bis ${fmtWhen(rt.empty_at)}` : 'reicht bis morgen Abend'}` : ''}`),
+        plan && plan.ok ? kpi('plan', MODE[plan.decision][1], MODE[plan.decision][2], 'Empfehlung jetzt', esc(plan.label), '', plan.buy_now ? 'Strom kaufen lohnt sich jetzt' : 'Kein Netzladen nötig') : '',
         kpi('price', 'euro', pr && avg != null && pr.price <= avg ? 'ok' : 'warn', 'Strompreis jetzt', pr ? cnt('price', nf(pr.price, 1)) : '–', pr ? 'ct/kWh' : '', pr ? `Börse ${nf(pr.spot, 1)} ct · Ø heute ${nf(avg, 1)} ct` : 'noch keine Preise'),
         kpi('today', 'sun', 'up', 'PV heute', cnt('prod', nf(ov.produced_kwh, 1)), 'kWh', best ? `Prognose ${nf(best.today, 1)} kWh (${esc(best.label)}) · morgen ${nf(best.tomorrow, 1)}` : 'noch keine Prognose'),
       ].join('');
 
       const ranking = ov.ranking || [];
       const sources = day ? Object.keys(day.forecasts) : [];
-      const hidden = hiddenSet(ranking, sources);
+      const loadKey = 'load:ep';
+      const hidden = hiddenSet(ranking, [...sources, loadKey]);
       const lines = sources.sort((a, b) => (ranking.indexOf(a) + 1 || 99) - (ranking.indexOf(b) + 1 || 99)).map((s) => ({ key: s, label: day.labels[s], color: srcColor(s) }));
+      if (loadDay && loadTomorrow && loadDay.forecasts.ep) lines.push({ key: loadKey, label: 'Verbrauch (Prognose)', color: 'var(--s7)', dash: true });
       const statusRows = Object.entries(ov.status).filter(([k]) => !k.startsWith('act:') || !ov.status[k].ok).map(([k, s]) => `<div class="list-item"><span class="dot ${s.ok ? 'ok' : 'err'}"></span><div class="grow"><div class="title">${esc(k === 'price' ? 'Börsenstrompreis' : k === 'actual' ? 'Messwerte aus Home Assistant' : k === 'ha' ? 'Home Assistant' : s.label)}</div><div class="meta ${s.ok ? '' : 'err'}">${s.ok ? `abgerufen ${fmtAgo(s.at)}` : esc(s.text)}</div></div></div>`).join('');
       const acc = (ov.accuracy || []).slice(0, 5);
       const bf = ov.backfill;
       el.innerHTML = `<div class="grid kpis">${kpis}</div>
         <div class="grid dash">
-          <div class="card"><div class="card-head"><h2>PV-Erzeugung heute &amp; morgen <span class="sub">stündlich · Prognose kurzfristig</span></h2></div>
+          <div class="card"><div class="card-head"><h2>PV-Erzeugung &amp; Verbrauch – heute und morgen <span class="sub">stündlich · Prognose kurzfristig</span></h2></div>
             <div class="card-body">${legendHTML({ ...MEASURED, label: 'Gemessen', color: 'var(--measured)' }, lines, hidden)}<div class="chart tall" id="pvChart"></div></div></div>
           <div class="card"><div class="card-head"><h2>Genauigkeit <span class="sub">letzte 30 Tage · Vortag</span></h2><a class="btn sm" href="#/accuracy">Details</a></div>
             <div class="card-body flush"><div class="list">${acc.length ? acc.map((r, i) => `<div class="list-item"><span class="rank ${i === 0 ? 'r1' : ''}">${i + 1}</span><span class="swatch-dot" style="background:${srcColor(r.source)}"></span><div class="grow"><div class="title">${esc(r.label)}</div><div class="meta">Tagesabweichung Ø ${pct(r.day_nmae_pct)} · ${r.days} Tage</div></div><b class="num">${pct(r.score, 0)}</b></div>`).join('')
@@ -486,7 +509,8 @@
       if (day && tomorrow) {
         const xs = [...day.hours, ...tomorrow.hours];
         const bar = { ...MEASURED, cls: 'bar-m', values: [...day.actual, ...tomorrow.actual] };
-        const ln = lines.filter((l) => !hidden.has(l.key)).map((l) => ({ ...l, values: [...((day.forecasts[l.key] || {}).d0 || day.hours.map(() => null)), ...((tomorrow.forecasts[l.key] || {}).d0 || tomorrow.hours.map(() => null))] }));
+        const series = (d, key) => (key === loadKey ? ((d === day ? loadDay : loadTomorrow).forecasts.ep || {}).d0 : (d.forecasts[key] || {}).d0) || d.hours.map(() => null);
+        const ln = lines.filter((l) => !hidden.has(l.key)).map((l) => ({ ...l, values: [...series(day, l.key), ...series(tomorrow, l.key)] }));
         chart($('#pvChart'), { xs, step: 3600, bar, lines: ln, fmt: (v) => fmtW(v).replace('W', 'Wh'), axisFmt: (v) => (v >= 1000 ? `${nf(v / 1000, 1)} kWh` : `${nf(v)} Wh`), head: (ts) => `${fmtDay(ts)} ${fmtHour(ts)}–${fmtHour(ts + 3600)}`, tick: (ts) => (new Date(ts * 1000).getHours() === 0 ? fmtDay(ts) : fmtHour(ts)), tickAt: (ts) => new Date(ts * 1000).getHours() % 6 === 0, height: 280, now: ov.now, noAnim: drawn, onClick: (i) => { location.hash = `#/day?d=${i < day.hours.length ? day.day : tomorrow.day}`; } });
         $$('.legend button[data-series]', el).forEach((b) => b.addEventListener('click', () => { toggleHidden(b.dataset.series); draw(S.overview); }));
       }
@@ -512,6 +536,80 @@
       tickAt: (ts) => { const d = new Date(ts * 1000); return d.getMinutes() === 0 && d.getHours() % 6 === 0; },
       emptyText: 'Noch keine Preise.',
     });
+  }
+
+  // ------------------------------------------------------------------- plan
+  async function renderPlan(el, token) {
+    let first = true;
+    const load = async () => {
+      const [p, ov] = await Promise.all([api('plan'), api('overview')]);
+      if (stale(token)) return;
+      draw(p, ov); first = false;
+    };
+    const draw = (p, ov) => {
+      setHeader('Planung', p.ok ? `Plan bis ${fmtWhen(p.horizon_end, true)} · PV: ${esc(p.pv_source || 'Open-Meteo Auto')} · Verbrauch: ${esc(p.load_source)}` : '', refreshBtn());
+      bindRefresh(load);
+      if (!p.ok && !p.runtime) {
+        el.innerHTML = `<div class="card"><div class="card-body">${empty('battery', 'Noch kein Plan', esc(p.reason || ''), `<a class="btn primary" href="#/settings?tab=sensors">${ic('gear')}Sensoren einstellen</a> <a class="btn" href="#/settings?tab=battery">Batterie einstellen</a>`)}</div></div>`;
+        return;
+      }
+      const rt = p.runtime || {};
+      const lv = (ov.live && ov.live.values) || {};
+      const house = lv.house && lv.house.value;
+      const m = p.ok ? MODE[p.decision] : null;
+      const loadSum = (from, to) => (p.energy || []).filter((e) => e.ts >= from && e.ts < to).reduce((a, e) => a + e.load, 0);
+      const tomorrowTs = dayTs(shiftDay(localDay(), 1)); const afterTs = dayTs(shiftDay(localDay(), 2));
+      const kpi = (icon, cls, label, value, foot) => `<div class="card kpi"><div class="kpi-label"><span class="kpi-icon ${cls}">${ic(icon)}</span>${label}</div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`;
+      el.innerHTML = `${p.ok ? `<div class="card decision ${m[2]}"><div class="card-body row" style="gap:16px;align-items:flex-start">
+          <div class="avatar ${m[2]}" style="width:48px;height:48px">${ic(m[1])}</div>
+          <div class="grow"><div class="faint" style="font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Empfehlung jetzt</div>
+            <div style="font-size:20px;font-weight:700;margin:2px 0 4px">${esc(p.label)}</div>
+            <div class="muted">${esc(p.text)}</div></div>
+          <span class="badge ${p.buy_now ? 'accent' : ''}" style="align-self:center">${p.buy_now ? 'Strom kaufen: ja' : 'Strom kaufen: nein'}</span></div></div>`
+        : `<div class="notice">${ic('alert')}<div>${esc(p.reason)}</div></div>`}
+        <div class="grid kpis">
+          ${kpi('battery', 'ok', 'Akku jetzt', `${cnt('psoc', nf(p.soc, 0))}<small>%</small>`, `${nf(rt.usable_kwh, 1)} kWh nutzbar bis zur Reserve von ${nf(p.battery.min_soc, 0)} %`)}
+          ${kpi('clock', 'warn', 'Reichweite', rt.now_hours != null ? esc(fmtDur(rt.now_hours)) : '–', house ? `beim aktuellen Verbrauch von ${fmtW(house)}` : 'Hausverbrauch-Sensor fehlt')}
+          ${kpi('sun', 'up', 'Laut Prognose', rt.empty_at ? `leer ${esc(fmtWhen(rt.empty_at))}` : 'reicht', rt.empty_at ? (rt.full_at && rt.full_at > rt.empty_at ? `wieder voll ${fmtWhen(rt.full_at)}` : 'mit PV-Erzeugung und Verbrauchsprognose') : rt.full_at ? `voll ${fmtWhen(rt.full_at)} · reicht bis ${fmtWhen(rt.until, true)}` : `bis ${fmtWhen(rt.until, true)}`)}
+          ${kpi('home', '', 'Verbrauch (Prognose)', `${nf(loadSum(0, tomorrowTs), 1)}<small>kWh</small>`, `bis Mitternacht · morgen ${nf(loadSum(tomorrowTs, afterTs), 1)} kWh · ohne E-Auto/Heizstab`)}
+          ${p.ok ? kpi('euro', p.savings_eur > 0.005 ? 'ok' : '', 'Ersparnis durch Plan', `${cnt('sav', nf(Math.max(0, p.savings_eur), 2))}<small>€</small>`, `Stromkosten ${nf(p.cost_eur, 2)} € statt ${nf(p.baseline_eur, 2)} € bis ${fmtWhen(p.horizon_end, true)}`) : ''}
+        </div>
+        <div class="grid cols-2">
+          <div class="card"><div class="card-head"><h2>Akku-Ladezustand <span class="sub">geplant</span></h2></div><div class="card-body"><div class="chart" id="socChart"></div></div></div>
+          <div class="card"><div class="card-head"><h2>Erzeugung, Verbrauch &amp; Netzbezug <span class="sub">Prognose</span></h2></div><div class="card-body">
+            <div class="legend"><span class="static"><i style="background:var(--pv)"></i>PV-Erzeugung</span><span class="static"><i style="background:var(--s7)"></i>Verbrauch</span>${p.ok ? '<span class="static"><i class="box" style="background:var(--measured)"></i>Netzbezug (geplant)</span>' : ''}</div>
+            <div class="chart" id="flowChart"></div></div></div>
+        </div>
+        ${p.ok ? `<div class="card"><div class="card-head"><h2>Strompreis &amp; Fahrplan</h2></div><div class="card-body">
+          <div class="legend">${Object.entries(MODE).map(([k, [l]]) => `<span class="static"><i class="box m-${k}"></i>${l}</span>`).join('')}</div>
+          <div class="chart" id="modeChart"></div></div></div>
+        <div class="card"><div class="card-head"><h2>Stundenplan</h2></div><div class="card-body flush"><div class="table-wrap"><table class="table compact">
+          <thead><tr><th>Zeit</th><th>Modus</th><th class="num">ct/kWh</th><th class="num">PV kWh</th><th class="num">Verbr. kWh</th><th class="num">Netz kWh</th><th class="num">Akku %</th></tr></thead><tbody>
+          ${p.steps.map((st) => `<tr><td class="nowrap">${fmtWhen(st.ts)}</td><td><span class="badge ${MODE[st.mode][2]}">${ic(MODE[st.mode][1])}${esc(st.label)}</span></td><td class="num">${nf(st.price, 1)}</td><td class="num">${nf(st.pv, 2)}</td><td class="num">${nf(st.load, 2)}</td><td class="num" title="↓ Bezug, ↑ Einspeisung">${st.import > 0.005 ? `↓ ${nf(st.import, 2)}` : st.export > 0.005 ? `↑ ${nf(st.export, 2)}` : '–'}</td><td class="num">${nf(st.soc_start, 0)} → ${nf(st.soc_end, 0)}</td></tr>`).join('')}
+          </tbody></table></div>
+          <div class="muted" style="padding:10px 18px 12px;font-size:12.5px;border-top:1px solid var(--border)">Der Plan ist eine <b>Empfehlung</b> – EnergyPilot steuert noch nichts. Für Automationen gibt es <code>sensor.energypilot_empfehlung</code>, <code>binary_sensor.energypilot_netzladen</code> und <code>binary_sensor.energypilot_entladesperre</code>. Neu berechnet wird alle 5 Minuten.</div></div></div>` : ''}`;
+      const opts = { noAnim: !first };
+      const hourHead = (ts) => `${fmtDay(ts)} ${fmtHour(ts)}–${fmtHour(ts + 3600)}`;
+      const tick = (ts) => (new Date(ts * 1000).getHours() === 0 ? fmtDay(ts) : fmtHour(ts));
+      const tickAt = (ts) => new Date(ts * 1000).getHours() % 6 === 0;
+      if (p.ok) {
+        chart($('#socChart'), { ...opts, xs: p.steps.map((st) => st.ts), step: 3600, height: 220, maxY: 100, lines: [{ key: 'soc', label: 'Ladezustand', color: 'var(--ok)', values: p.steps.map((st) => st.soc_end) }], fmt: (v) => `${nf(v, 0)} %`, head: hourHead, tick, tickAt });
+      } else $('#socChart').innerHTML = `<div class="empty" style="padding:60px 0">${esc(p.reason)}</div>`;
+      const en = p.energy || [];
+      const imp = new Map((p.steps || []).map((st) => [st.ts, st.import]));
+      chart($('#flowChart'), { ...opts, xs: en.map((e) => e.ts), step: 3600, height: 220,
+        bar: p.ok ? { label: 'Netzbezug (geplant)', color: 'var(--measured)', cls: 'bar-m', values: en.map((e) => (imp.has(e.ts) ? imp.get(e.ts) * 1000 : null)) } : null,
+        lines: [{ key: 'pv', label: 'PV-Erzeugung', color: 'var(--pv)', values: en.map((e) => e.pv * 1000) }, { key: 'load', label: 'Verbrauch', color: 'var(--s7)', values: en.map((e) => e.load * 1000) }],
+        fmt: (v) => `${nf(v)} Wh`, axisFmt: (v) => (v >= 1000 ? `${nf(v / 1000, 1)} kWh` : `${nf(v)} Wh`), head: hourHead, tick, tickAt });
+      if (p.ok) {
+        chart($('#modeChart'), { ...opts, xs: p.steps.map((st) => st.ts), step: 3600, height: 200, lines: [],
+          bar: { label: 'Strompreis', color: 'var(--price)', cls: 'bar-p', values: p.steps.map((st) => st.price), clsFor: (i) => `m-${p.steps[i].mode}` },
+          fmt: (v) => ctkwh(v, 1), axisFmt: (v) => `${nf(v)} ct`, head: (ts) => { const st = p.steps.find((x) => x.ts === ts); return `${hourHead(ts)} · ${st ? esc(st.label) : ''}`; }, tick, tickAt });
+      }
+    };
+    await load();
+    const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 60000);
+    S.cleanup.push(() => clearInterval(timer));
   }
 
   // How the own forecast currently combines the sources (per array)
@@ -718,7 +816,7 @@
   }
 
   // --------------------------------------------------------------- settings
-  const SET_TABS = [['arrays', 'solar', 'PV-Anlagen'], ['sources', 'cloudSun', 'Prognosequellen'], ['tariff', 'euro', 'Strompreis'], ['sensors', 'sliders', 'Sensoren & Standort'], ['look', 'palette', 'Darstellung']];
+  const SET_TABS = [['arrays', 'solar', 'PV-Anlagen'], ['sources', 'cloudSun', 'Prognosequellen'], ['tariff', 'euro', 'Strompreis'], ['battery', 'battery', 'Batterie'], ['sensors', 'sliders', 'Sensoren & Standort'], ['look', 'palette', 'Darstellung']];
   async function renderSettings(el, token) {
     const q = query();
     let tab = q.get('tab') || store.get('settingsTab', 'arrays');
@@ -729,7 +827,7 @@
     el.innerHTML = `<div class="seg" id="setTabs" style="margin-bottom:16px">${SET_TABS.map(([k, icon, label]) => `<button data-tab="${k}" class="${tab === k ? 'active' : ''}">${ic(icon)}${label}</button>`).join('')}</div><div id="setBody"></div>`;
     $$('#setTabs button').forEach((b) => b.addEventListener('click', () => { if (b.dataset.tab !== tab) location.hash = `#/settings?tab=${b.dataset.tab}`; }));
     const body = $('#setBody');
-    const fn = { arrays: renderArrays, sources: renderSources, tariff: renderTariff, sensors: renderSensors, look: renderLook }[tab];
+    const fn = { arrays: renderArrays, sources: renderSources, tariff: renderTariff, battery: renderBattery, sensors: renderSensors, look: renderLook }[tab];
     await fn(body, token);
   }
 
@@ -977,6 +1075,27 @@
     draw();
   }
 
+  async function renderBattery(el) {
+    setHeader('Einstellungen', 'Heimspeicher für die Planung');
+    const b = S.settings.battery;
+    const f = (id, label, val, unit, hint, attrs = '') => `<div class="field"><label>${label}${unit ? ` (${unit})` : ''}</label><input class="input" id="${id}" type="number" ${attrs} value="${val}"><span class="hint">${hint}</span></div>`;
+    el.innerHTML = `<div class="grid cols-2"><div class="card"><div class="card-head"><div class="avatar accent">${ic('battery')}</div><h2>Batterie</h2></div><div class="card-body">
+        <p class="explain">Die Werte stehen im Datenblatt bzw. in der App des Speichers (z. B. sonnenBatterie). Der Ladezustand kommt aus dem Sensor unter <a href="#/settings?tab=sensors">Sensoren</a>.</p>
+        <div class="form-grid">
+          ${f('b_cap', 'Nutzbare Kapazität', b.capacity_kwh, 'kWh', 'z. B. 11', 'step="0.1" min="0.5"')}
+          ${f('b_min', 'Reserve', b.min_soc, '%', 'unter diesen Ladezustand wird nicht entladen', 'step="1" min="0" max="90"')}
+          ${f('b_pc', 'Max. Ladeleistung', b.max_charge_kw, 'kW', '', 'step="0.1" min="0.1"')}
+          ${f('b_pd', 'Max. Entladeleistung', b.max_discharge_kw, 'kW', '', 'step="0.1" min="0.1"')}
+          ${f('b_eff', 'Wirkungsgrad Laden + Entladen', Math.round(b.efficiency * 100), '%', 'typisch 88–95 %', 'step="1" min="50" max="100"')}
+          ${f('b_max', 'Netzladen bis', b.max_soc_grid, '%', 'höchster Ladezustand beim Laden aus dem Netz', 'step="1" min="10" max="100"')}
+        </div>
+        <label class="check" style="margin:4px 0 16px"><input type="checkbox" id="b_grid" ${b.grid_charge ? 'checked' : ''}>Laden aus dem Netz einplanen, wenn es sich lohnt</label>
+        <button class="btn primary" id="b_save">${ic('check')}Speichern</button></div></div></div>`;
+    $('#b_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({ battery: {
+      capacity_kwh: $('#b_cap').value, min_soc: $('#b_min').value, max_charge_kw: $('#b_pc').value, max_discharge_kw: $('#b_pd').value,
+      efficiency: Number($('#b_eff').value) / 100, max_soc_grid: $('#b_max').value, grid_charge: $('#b_grid').checked } })));
+  }
+
   async function renderSensors(el) {
     setHeader('Einstellungen', 'Sensoren für Live-Werte und spätere Optimierung');
     let ents = [];
@@ -1021,7 +1140,7 @@
     draw();
   }
 
-  const RENDER = { dashboard: renderDashboard, accuracy: renderAccuracy, day: renderDay, prices: renderPrices, settings: renderSettings };
+  const RENDER = { dashboard: renderDashboard, plan: renderPlan, accuracy: renderAccuracy, day: renderDay, prices: renderPrices, settings: renderSettings };
   // -------------------------------------------------------------- UI pieces
   function toast(msg, type = 'ok') {
     const el = document.createElement('div');

@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 
-from . import __version__, analysis, learn
+from . import __version__, analysis, learn, planner
 from .config import OPEN_METEO_MODELS, Options, Settings, to_array
 from .db import Database
 from .ha import HAError, HomeAssistant
@@ -22,6 +22,8 @@ _LOGGER = logging.getLogger(__name__)
 
 ARCHIVE_CHUNK_DAYS = 92
 LIVE_INTERVAL = 15
+PLAN_INTERVAL = 300
+MODE_LABEL = {"normal": "Eigenverbrauch", "hold": "Akku halten", "charge": "Aus dem Netz laden"}
 GEOMETRY_KEYS = ("planes", "efficiency", "ac_max_kw")
 POWER_UNITS = {"W": 1.0, "kW": 1000.0, "MW": 1e6}
 
@@ -57,6 +59,8 @@ class Hub:
         self._acc_cache: dict[tuple, tuple[float, dict]] = {}
         self._midnight: dict[str, int] = {}
         self.model_info: dict[str, dict] = {}
+        self.plan: dict = {"ok": False, "reason": "Wird berechnet …"}
+        self._plan_at = 0.0
 
     # ------------------------------------------------------------------ basics
     @property
@@ -173,6 +177,7 @@ class Hub:
             await self.backfill_archive()
             await self.run_learning()
             self._acc_cache.clear()
+            await self.update_plan()
             await self.publish()
 
     # ------------------------------------------------------------------ prices
@@ -521,11 +526,195 @@ class Hub:
         if rows:
             self.mark("learn", True, count=len(rows))
 
+    # ---------------------------------------------------------------- planning
+    def battery(self) -> planner.Battery:
+        b = self.settings.data["battery"]
+        return planner.Battery(**{k: b[k] for k in planner.Battery.__dataclass_fields__})
+
+    def energy_hours(self, now: float) -> tuple[list[dict], str | None, str]:
+        """PV and base-load forecast per hour from now to the end of tomorrow (kWh)."""
+        start = int(now) // 3600 * 3600
+        end = self.midnight(self.midnight(self.midnight(int(now)) + 90000) + 90000)
+        ids = [c["id"] for c in self.settings.arrays if c["kwp"] > 0]
+        best = self.best_source() if ids else None
+        pv: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
+        count: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+        load: dict[int, float] = {}
+        for source, arr, t, wh in self.db.forecasts(start, end, "d0"):
+            if arr in ids:
+                pv[source][t] += wh
+                count[source][t] += 1
+            elif source == learn.LOAD_SOURCE and arr == learn.BASE_SERIES:
+                load[t] = wh
+        # take the most accurate source; hours it does not cover come from Open-Meteo Auto
+        order = [x for x in (best, learn.PV_SOURCE, "om:best_match") if x]
+        profile = self.load_profile() if len(load) < (end - start) // 3600 else {}
+        out = []
+        for t in range(start, end, 3600):
+            frac = 1 - (now - t) / 3600 if t == start else 1.0
+            src = next((x for x in order if count[x].get(t) == len(ids)), None)
+            pv_wh = pv[src][t] if src else 0.0
+            load_wh = load.get(t)
+            if load_wh is None:
+                load_wh = profile.get(datetime.fromtimestamp(t, self.tz).hour, 400.0)
+            out.append({"t": t, "frac": frac, "pv": pv_wh / 1000 * frac, "load": load_wh / 1000 * frac})
+        return out, best, "Verbrauchsprognose" if load else "Durchschnitt der letzten 14 Tage"
+
+    def load_profile(self) -> dict[int, float]:
+        """Mean consumption per hour of day over the last 14 days (fallback)."""
+        now = int(time.time())
+        per: dict[int, list[float]] = defaultdict(list)
+        rows = self.db.actuals(now - 14 * 86400, now, learn.BASE_SERIES) or self.db.actuals(now - 14 * 86400, now, "house")
+        for _s, t, wh in rows:
+            per[datetime.fromtimestamp(t, self.tz).hour].append(max(0.0, wh))
+        return {h: sum(v) / len(v) for h, v in per.items() if v}
+
+    def battery_runtime(self, soc_kwh: float, hours: list[dict], house_w: float | None, now: float) -> dict:
+        """How long the battery lasts: at today's consumption and along the forecast."""
+        b = self.battery()
+        lo = b.capacity_kwh * b.min_soc / 100
+        usable = max(0.0, soc_kwh - lo)
+        out = {"usable_kwh": round(usable, 2), "now_hours": None, "empty_at": None, "full_at": None,
+               "until": hours[-1]["t"] + 3600 if hours else None}
+        if house_w and house_w > 50:
+            out["now_hours"] = round(usable / (house_w / 1000), 2)
+        soc = soc_kwh
+        eta = b.eta
+        for h in hours:
+            t0 = now if h["frac"] < 1 else h["t"]
+            span = h["frac"] * 3600
+            net = h["pv"] - h["load"]
+            if net >= 0:
+                gain = min(net, b.max_charge_kw * h["frac"]) * eta
+                if out["full_at"] is None and soc < b.capacity_kwh - 0.05 <= soc + gain:
+                    out["full_at"] = int(t0 + span * (b.capacity_kwh - soc) / gain)
+                soc = min(b.capacity_kwh, soc + gain)
+            else:
+                need = min(-net, b.max_discharge_kw * h["frac"]) / eta
+                if soc - need <= lo:
+                    if out["empty_at"] is None:
+                        out["empty_at"] = int(t0 + span * max(0.0, soc - lo) / need) if need > 0 else int(t0)
+                    soc = lo
+                else:
+                    soc -= need
+        return out
+
+    def compute_plan(self) -> dict:
+        now = time.time()
+        soc_val = (self.live.get("values", {}).get("battery_soc") or {}).get("value")
+        if not self.settings.data["sensors"].get("battery_soc"):
+            return {"ok": False, "reason": "Für den Plan wird der Ladezustand der Batterie gebraucht – bitte unter Einstellungen › Sensoren auswählen."}
+        if soc_val is None:
+            return {"ok": False, "reason": "Der Ladezustand der Batterie ist gerade nicht verfügbar."}
+        b = self.battery()
+        soc_kwh = b.capacity_kwh * float(soc_val) / 100
+        energy, best, load_src = self.energy_hours(now)
+        house = (self.live.get("values", {}).get("house") or {}).get("value")
+        runtime = self.battery_runtime(soc_kwh, energy, house, now)
+        prices_h: dict[int, list[float]] = defaultdict(list)
+        for slot in self.price_slots(int(now) // 3600 * 3600, energy[-1]["t"] + 3600 if energy else int(now)):
+            prices_h[slot["ts"] // 3600 * 3600].append(slot["price"])
+        hours = []
+        for e in energy:  # the plan ends where known prices end
+            if e["t"] not in prices_h:
+                break
+            hours.append(planner.Hour(e["t"], e["pv"], e["load"], sum(prices_h[e["t"]]) / len(prices_h[e["t"]]), e["frac"]))
+        base = {
+            "soc": round(float(soc_val), 1),
+            "runtime": runtime,
+            "pv_source": source_label(best) if best else None,
+            "load_source": load_src,
+            "battery": self.settings.data["battery"],
+            "energy": [{"ts": e["t"], "pv": round(e["pv"], 3), "load": round(e["load"], 3)} for e in energy],
+        }
+        if not hours:
+            return {**base, "ok": False, "reason": "Noch keine Strompreise für die nächsten Stunden."}
+        feed_in = float(self.settings.data["tariff"].get("feed_in_ct", 0))
+        plan = planner.optimize(hours, soc_kwh, b, feed_in)
+        cap = b.capacity_kwh
+        steps = [
+            {
+                "ts": st.start, "mode": st.mode, "label": MODE_LABEL[st.mode], "price": round(h.price, 2),
+                "pv": round(h.pv_kwh, 3), "load": round(h.load_kwh, 3),
+                "import": round(st.grid_import, 3), "export": round(st.grid_export, 3),
+                "soc_start": round(st.soc_start / cap * 100, 1), "soc_end": round(st.soc_end / cap * 100, 1),
+                "cost": round(st.cost, 1),
+            }
+            for st, h in zip(plan.steps, hours, strict=True)
+        ]
+        first = steps[0]
+        return {
+            **base,
+            "ok": True,
+            "at": int(now),
+            "decision": first["mode"],
+            "label": first["label"],
+            "buy_now": first["mode"] == "charge",
+            "text": _decision_text(steps, self.tz),
+            "steps": steps,
+            "cost_eur": round(plan.cost / 100, 2),
+            "baseline_eur": round(plan.cost_baseline / 100, 2),
+            "savings_eur": round(plan.savings / 100, 2),
+            "horizon_end": steps[-1]["ts"] + 3600,
+        }
+
+    async def update_plan(self) -> None:
+        try:
+            self.plan = await asyncio.to_thread(self.compute_plan)
+        except Exception as err:
+            _LOGGER.exception("Planning failed")
+            self.plan = {"ok": False, "reason": f"Planung fehlgeschlagen: {err}"}
+        self._plan_at = time.time()
+
+    async def publish_plan(self) -> None:
+        if not self.options.publish_sensors or not self.ha.available or self.options.demo:
+            return
+        p = self.plan
+        ok = p.get("ok")
+        tz = self.tz
+        await self.ha.publish(
+            "sensor.energypilot_empfehlung",
+            p.get("label") if ok else "unbekannt",
+            {
+                "friendly_name": "EnergyPilot Empfehlung",
+                "icon": "mdi:battery-sync-outline",
+                "mode": p.get("decision"),
+                "reason": p.get("text") if ok else p.get("reason"),
+                "savings_eur": p.get("savings_eur"),
+                "plan": [
+                    {"start": datetime.fromtimestamp(st["ts"], tz).isoformat(), "mode": st["mode"], "soc": st["soc_end"], "price": st["price"]}
+                    for st in p.get("steps", [])
+                ],
+            },
+        )
+        for key, on, name, icon in (
+            ("netzladen", ok and p["decision"] == "charge", "EnergyPilot Akku aus dem Netz laden", "mdi:transmission-tower-import"),
+            ("entladesperre", ok and p["decision"] in ("hold", "charge"), "EnergyPilot Akku-Entladung sperren", "mdi:battery-lock"),
+        ):
+            await self.ha.publish(f"binary_sensor.energypilot_{key}", "on" if on else "off", {"friendly_name": name, "icon": icon})
+        rt = p.get("runtime") or {}
+        if rt:
+            await self.ha.publish(
+                "sensor.energypilot_akku_reichweite",
+                rt.get("now_hours"),
+                {
+                    "friendly_name": "EnergyPilot Akku-Reichweite",
+                    "unit_of_measurement": "h",
+                    "icon": "mdi:battery-clock-outline",
+                    "usable_kwh": rt.get("usable_kwh"),
+                    "empty_at": datetime.fromtimestamp(rt["empty_at"], tz).isoformat() if rt.get("empty_at") else None,
+                    "full_at": datetime.fromtimestamp(rt["full_at"], tz).isoformat() if rt.get("full_at") else None,
+                },
+            )
+
     # -------------------------------------------------------------------- live
     async def _live_loop(self) -> None:
         while True:
             try:
                 await self.read_live()
+                if time.time() - self._plan_at > PLAN_INTERVAL:
+                    await self.update_plan()
+                    await self.publish_plan()
                 slot = int(time.time()) // 900
                 if slot != self._price_slot:
                     self._price_slot = slot
@@ -689,6 +878,7 @@ class Hub:
             "accuracy": accuracy,
             "produced_kwh": round(produced / 1000, 2),
             "load": {k: round(v / 1000, 2) for k, v in load.items()} if any(load.values()) else None,
+            "plan": {k: v for k, v in self.plan.items() if k not in ("steps", "energy")},
             "status": {k: {**v, "label": source_label(k) if not k.startswith("act:") else k[4:]} for k, v in self.status.items()},
             "backfill": self.backfill,
             "ha": self.ha.available,
@@ -696,6 +886,8 @@ class Hub:
 
     # ----------------------------------------------------------------- sensors
     async def publish(self, price_only: bool = False) -> None:
+        if not price_only:
+            await self.publish_plan()
         if not self.options.publish_sensors or not self.ha.available or self.options.demo:
             return
         now = time.time()
@@ -797,3 +989,26 @@ def _live_value(key: str, entity: str, st: dict | None) -> dict:
     else:
         out.update(value=value, unit=unit)
     return out
+
+
+def _decision_text(steps: list[dict], tz: ZoneInfo) -> str:
+    """One sentence why the current hour is planned the way it is."""
+    now = steps[0]
+    later = [st for st in steps[1:] if st["soc_end"] < st["soc_start"] - 0.5 and st["price"] > now["price"]]
+    peak = max(later, key=lambda st: st["price"]) if later else None
+    when = datetime.fromtimestamp(later[0]["ts"], tz).strftime("%H:%M") if later else None
+    if now["mode"] == "charge":
+        if peak:
+            return (f"Jetzt aus dem Netz laden: {now['price']:.1f} ct/kWh ist günstig – die Energie ersetzt ab {when} "
+                    f"Netzstrom für bis zu {peak['price']:.1f} ct/kWh.")
+        return f"Jetzt aus dem Netz laden: {now['price']:.1f} ct/kWh ist einer der günstigsten Preise im Planungszeitraum."
+    if now["mode"] == "hold":
+        if peak:
+            return (f"Akku halten: Netzstrom kostet jetzt {now['price']:.1f} ct/kWh – die gespeicherte Energie wird ab "
+                    f"{when} gebraucht, wenn er bis zu {peak['price']:.1f} ct/kWh kostet.")
+        return f"Akku halten: Netzstrom ist jetzt mit {now['price']:.1f} ct/kWh vergleichsweise günstig."
+    if now["export"] > 0.05:
+        return "Eigenverbrauch: Die Sonne liefert mehr als gebraucht wird – der Überschuss lädt den Akku bzw. wird eingespeist."
+    if now["import"] > 0.05:
+        return f"Eigenverbrauch: Der Akku ist auf der Reserve – der Rest kommt aus dem Netz ({now['price']:.1f} ct/kWh)."
+    return "Eigenverbrauch: Der Akku deckt den Verbrauch – Strom kaufen lohnt sich gerade nicht."

@@ -85,6 +85,35 @@ mehr; hängt der Verbrauch erkennbar von der Außentemperatur ab, wird das berü
 Heizstab sind steuerbar und werden später gezielt eingeplant. Vergleichsmaßstab im Prognose-Check
 (Auswahl „Grundverbrauch“) ist „Wie vor einer Woche“.
 
+## Planung
+
+Die Seite **Planung** rechnet alle 5 Minuten den günstigsten Fahrplan für den Heimspeicher bis zum Ende
+der bekannten Strompreise (die Preise für morgen erscheinen gegen 13 Uhr). Für jede Stunde gibt es drei
+Möglichkeiten:
+
+| Modus | Bedeutung |
+|---|---|
+| Eigenverbrauch | Der Akku arbeitet wie gewohnt: PV-Überschuss laden, Verbrauch decken |
+| Akku halten | Der Akku wird nicht entladen – die Energie wird für spätere, teurere Stunden aufgespart |
+| Aus dem Netz laden | Günstiger Netzstrom wird eingespeichert, weil er später teureren Netzstrom ersetzt |
+
+Grundlage sind die genaueste PV-Prognose, die Verbrauchsprognose (ohne E-Auto und Heizstab), der
+aktuelle Ladezustand, die Akku-Daten (Einstellungen › Batterie) und die Strompreise. Energie, die am
+Ende noch im Akku ist, wird mit einem vorsichtigen Preis bewertet, damit der Plan den Akku nicht
+künstlich leerfährt. Umgeschaltet wird nur, wenn es über den ganzen Zeitraum mindestens 1 ct spart.
+
+Die **Reichweite** zeigt, wie lange der Akku beim aktuellen Hausverbrauch bis zur Reserve reicht, und
+wann er laut Prognose (mit PV-Erzeugung) leer bzw. wieder voll ist.
+
+EnergyPilot **steuert noch nichts**. Die Empfehlung steht als Sensoren für eigene Automationen bereit:
+
+| Entität | Inhalt |
+|---|---|
+| `sensor.energypilot_empfehlung` | Eigenverbrauch / Akku halten / Aus dem Netz laden; Attribute `reason`, `plan` |
+| `binary_sensor.energypilot_netzladen` | an, wenn jetzt aus dem Netz geladen werden soll |
+| `binary_sensor.energypilot_entladesperre` | an, wenn der Akku jetzt nicht entladen werden soll |
+| `sensor.energypilot_akku_reichweite` | Stunden beim aktuellen Verbrauch; Attribute `empty_at`, `full_at` |
+
 ## Prognose-Check
 
 | Kennzahl | Bedeutung |

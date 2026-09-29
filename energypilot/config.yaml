@@ -1,5 +1,5 @@
 name: EnergyPilot
-version: "0.2.1"
+version: "0.3.0"
 slug: energypilot
 description: >-
   Energiemanager für PV, Batterie, E-Auto und dynamischen Strompreis –

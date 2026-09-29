@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+- Neu: **Planung** – günstigster Fahrplan für den Heimspeicher bis zum Ende der bekannten Strompreise (meist morgen 24 Uhr). Pro Stunde: Eigenverbrauch, Akku halten (Energie für teure Stunden aufsparen) oder aus dem Netz laden. Grundlage: genaueste PV-Prognose, Verbrauchsprognose, aktueller Ladezustand und Strompreise; Energie, die am Ende im Akku bleibt, wird mit einem vorsichtigen Preis bewertet
+- **Empfehlung jetzt** mit Begründung („Strom kaufen: ja/nein“) und Ersparnis gegenüber dem Akku ohne Planung; Umschalten nur, wenn es mindestens 1 ct bringt
+- **Akku-Reichweite:** wie lange der Akku beim aktuellen Verbrauch reicht und wann er laut Prognose leer bzw. wieder voll ist – auf der Planungsseite und in der Übersicht
+- **Verbrauchsprognose sichtbar:** als Linie im Diagramm der Übersicht und auf der Planungsseite
+- Neuer Einstellungsreiter **Batterie**: Kapazität, Reserve, Lade-/Entladeleistung, Wirkungsgrad, Netzladen bis, Netzladen erlauben
+- Neue Sensoren: `sensor.energypilot_empfehlung`, `binary_sensor.energypilot_netzladen`, `binary_sensor.energypilot_entladesperre`, `sensor.energypilot_akku_reichweite`
+- Noch keine Steuerung – die Empfehlung kann über die Sensoren in eigenen Automationen genutzt werden
+
 ## 0.2.1
 
 - Sensorauswahl mit **Suche**: Name oder Entitäts-ID eintippen (mehrere Wörter möglich), mit Pfeiltasten und Enter auswählen oder die Liste aufklappen; zeigt aktuellen Wert und Einheit und markiert Sensoren ohne Langzeitstatistik. Eine Entität, die nicht in der Liste steht, kann direkt als ID eingetragen werden

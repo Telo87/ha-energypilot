@@ -1,6 +1,6 @@
 # EnergyPilot – Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-0.2.1-blue)
+![Version](https://img.shields.io/badge/version-0.3.0-blue)
 
 Welche PV-Prognose stimmt bei **deinem** Dach? EnergyPilot sammelt stündlich die Prognosen mehrerer
 Wetterdienste, vergleicht sie mit der tatsächlichen Erzeugung jeder Anlage und zeigt dynamische
@@ -16,13 +16,13 @@ Batterie, E-Auto und Heizstab.
 - **Strompreise:** EPEX Day-Ahead in Viertelstunden mit den Aufschlägen deines Tarifs (z. B. sonnen EnergyDynamic), günstigste Zeitfenster
 - **Eigene, lernende PV-Prognose:** gewichtet die Quellen nach ihrer Treffsicherheit bei deinen Anlagen und lernt Verschattung und Abregelung – und muss sich im Prognose-Check gegen die Wetterdienste behaupten
 - **Verbrauchsprognose** für den Grundverbrauch (ohne E-Auto und Heizstab) nach Uhrzeit, Wochentag und Temperatur
-- **Sensoren** für Automationen: Strompreis, PV-Prognose und Verbrauchsprognose heute und morgen, genaueste Quelle
+- **Planung:** günstigster Fahrplan für den Akku bis morgen Abend – Eigenverbrauch, Akku halten oder aus dem Netz laden – mit Begründung und Ersparnis; Akku-Reichweite beim aktuellen Verbrauch und laut Prognose
+- **Sensoren** für Automationen: Empfehlung, Netzladen/Entladesperre, Akku-Reichweite, Strompreis, PV- und Verbrauchsprognose, genaueste Quelle
 
 ## Geplant
 
-- Energiebilanz für heute und morgen mit Batterie-Ladezustand
-- Planer: Batterie aus dem Netz laden, ja oder nein (sonnenBatterie), E-Auto-Ladeplan über evcc, Heizstab bei Überschuss
-- Live-Entscheidung „Strom kaufen oder nicht“
+- Steuerung: Empfehlung automatisch an die sonnenBatterie übergeben (mit Sicherheitsgrenzen)
+- E-Auto-Ladeplan über evcc, Heizstab bei PV-Überschuss
 
 ## Installation
 

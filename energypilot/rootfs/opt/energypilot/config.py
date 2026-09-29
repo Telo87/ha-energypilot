@@ -79,7 +79,21 @@ DEFAULT_SETTINGS: dict = {
     # ev / heater: measured separately and subtracted from the house consumption
     "sensors": {"house": "", "grid": "", "battery_soc": "", "battery_power": "", "ev": "", "heater": ""},
     "backfill_days": 90,
+    # home battery for the planner (sonnenBatterie etc.)
+    "battery": {
+        "capacity_kwh": 11.0,
+        "min_soc": 10.0,  # % reserve the battery does not go below
+        "max_soc_grid": 100.0,  # % – grid charging stops here
+        "max_charge_kw": 3.3,
+        "max_discharge_kw": 3.3,
+        "efficiency": 0.92,  # round trip
+        "grid_charge": True,
+    },
 }
+BATTERY_LIMITS = (
+    ("capacity_kwh", 0.5, 200), ("min_soc", 0, 90), ("max_soc_grid", 10, 100),
+    ("max_charge_kw", 0.1, 50), ("max_discharge_kw", 0.1, 50), ("efficiency", 0.5, 1.0),
+)
 
 _ARRAY_DEFAULTS = {
     "name": "",
@@ -265,6 +279,14 @@ class Settings:
                 for key in DEFAULT_SETTINGS["sensors"]:
                     if key in sensors:
                         self.data["sensors"][key] = _entity(sensors[key])
+            bat = values.get("battery")
+            if isinstance(bat, dict):
+                b = self.data["battery"]
+                for key, lo, hi in BATTERY_LIMITS:
+                    if key in bat:
+                        b[key] = _num(bat[key], b[key], lo, hi)
+                if "grid_charge" in bat:
+                    b["grid_charge"] = bool(bat["grid_charge"])
             if "backfill_days" in values:
                 self.data["backfill_days"] = int(_num(values["backfill_days"], 90, 0, 730))
             self._save()

@@ -124,6 +124,14 @@ async def price_view(request: web.Request) -> web.Response:
     return _ok({"slots": hub.price_slots(start, end), "tariff": hub.settings.data["tariff"], "now": int(time.time())})
 
 
+@routes.get("/api/plan")
+async def plan(request: web.Request) -> web.Response:
+    hub = _hub(request)
+    if time.time() - hub._plan_at > 60:
+        await hub.update_plan()
+    return _ok(hub.plan)
+
+
 @routes.post("/api/refresh")
 async def refresh(request: web.Request) -> web.Response:
     _hub(request).trigger()
@@ -149,6 +157,7 @@ async def post_settings(request: web.Request) -> web.Response:
     if hub.settings.data["backfill_days"] > old_backfill:
         await asyncio.to_thread(hub.db.del_meta_prefix, "archive:")
         await asyncio.to_thread(hub.db.del_meta_prefix, "actual:")
+    hub._plan_at = 0  # recalculate the plan with the new settings
     hub.trigger()
     return _ok(hub.settings.public())
 

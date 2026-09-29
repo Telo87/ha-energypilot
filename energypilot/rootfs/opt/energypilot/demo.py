@@ -138,6 +138,8 @@ async def live_loop(hub) -> None:
             "battery_power": {"entity": "sensor.batterie_leistung", "name": "Batterie Leistung", "value": round(batt), "unit": "W"},
         })
         hub.live = {"at": now, "values": values}
+        if now - hub._plan_at > 60:
+            await hub.update_plan()
         await asyncio.sleep(5)
 
 
