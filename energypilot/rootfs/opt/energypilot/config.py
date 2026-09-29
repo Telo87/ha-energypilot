@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from .solar import Array
+from .solar import Array, Plane
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -82,9 +82,9 @@ DEFAULT_SETTINGS: dict = {
 
 _ARRAY_DEFAULTS = {
     "name": "",
-    "kwp": 0.0,
-    "tilt": 30.0,
-    "azimuth": 180.0,
+    # orientations measured by the sensor, e.g. east + west string: [{kwp, tilt, azimuth}]
+    "planes": [],
+    "kwp": 0.0,  # sum of all planes (derived)
     "efficiency": 0.88,
     "ac_max_kw": 0.0,
     "sensor": "",  # power (W/kW) or energy (Wh/kWh) sensor of this array's inverter
@@ -109,17 +109,31 @@ def _entity(value) -> str:
     return v if re.fullmatch(r"[a-z_]+\.[a-z0-9_]+", v) else ""
 
 
+MAX_PLANES = 6
+
+
+def clean_plane(data: dict) -> dict:
+    return {
+        "kwp": _num(data.get("kwp"), 0.0, 0, 1000),
+        "tilt": _num(data.get("tilt"), 30.0, 0, 90),
+        "azimuth": _num(data.get("azimuth"), 180.0) % 360,
+    }
+
+
 def clean_array(data: dict, existing: dict | None = None) -> dict:
     arr = dict(existing or _ARRAY_DEFAULTS)
     arr.setdefault("id", uuid.uuid4().hex[:8])
     if "name" in data:
         arr["name"] = str(data["name"] or "").strip()[:40]
-    if "kwp" in data:
-        arr["kwp"] = _num(data["kwp"], arr["kwp"], 0, 1000)
-    if "tilt" in data:
-        arr["tilt"] = _num(data["tilt"], arr["tilt"], 0, 90)
-    if "azimuth" in data:
-        arr["azimuth"] = _num(data["azimuth"], arr["azimuth"]) % 360
+    planes = data.get("planes")
+    if planes is None and "kwp" in data:  # single orientation (settings of version 0.1.0)
+        planes = [{k: data.get(k) for k in ("kwp", "tilt", "azimuth")}]
+    if isinstance(planes, list):
+        arr["planes"] = [p for p in (clean_plane(p) for p in planes[:MAX_PLANES] if isinstance(p, dict)) if p["kwp"] > 0]
+    arr["planes"] = list(arr.get("planes") or [])
+    arr["kwp"] = round(sum(p["kwp"] for p in arr["planes"]), 3)
+    for legacy in ("tilt", "azimuth"):
+        arr.pop(legacy, None)
     if "efficiency" in data:
         arr["efficiency"] = _num(data["efficiency"], arr["efficiency"], 0.5, 1.0)
     if "ac_max_kw" in data:
@@ -136,9 +150,7 @@ def clean_array(data: dict, existing: dict | None = None) -> dict:
 def to_array(cfg: dict) -> Array:
     return Array(
         id=cfg["id"],
-        kwp=cfg["kwp"],
-        tilt=cfg["tilt"],
-        azimuth=cfg["azimuth"],
+        planes=tuple(Plane(p["kwp"], p["tilt"], p["azimuth"]) for p in cfg["planes"]),
         efficiency=cfg["efficiency"],
         ac_max_kw=cfg["ac_max_kw"],
     )

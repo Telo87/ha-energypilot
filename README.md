@@ -1,6 +1,6 @@
 # EnergyPilot – Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Version](https://img.shields.io/badge/version-0.1.1-blue)
 
 Welche PV-Prognose stimmt bei **deinem** Dach? EnergyPilot sammelt stündlich die Prognosen mehrerer
 Wetterdienste, vergleicht sie mit der tatsächlichen Erzeugung jeder Anlage und zeigt dynamische
@@ -9,7 +9,7 @@ Batterie, E-Auto und Heizstab.
 
 ## Funktionen (0.1)
 
-- **Mehrere PV-Anlagen** mit eigener Ausrichtung und eigenem Messsensor (z. B. zwei Wechselrichter)
+- **Mehrere PV-Anlagen** mit eigenem Messsensor, auch mit mehreren Ausrichtungen an einem Wechselrichter (z. B. Ost-West)
 - **Prognosequellen:** DWD ICON-D2 und ICON-EU, ECMWF, NOAA GFS, Météo-France und weitere über Open-Meteo (kostenlos), Forecast.Solar, optional Solcast
 - **Sofortiger Rückblick:** Messwerte aus der Langzeitstatistik von Home Assistant und archivierte Modellprognosen der letzten 90 Tage, die Rangliste steht nach wenigen Minuten
 - **Prognose-Check:** Genauigkeit je Quelle, für Vortag und kurzfristig, nach Wetterlage und je Anlage

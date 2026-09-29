@@ -26,9 +26,9 @@ LIVE_SOURCES = {"fs"}  # only collected live: starts 10 days ago
 
 def demo_entities() -> list[dict]:
     rows = [
-        ("sensor.wechselrichter_ost_ac_leistung", "Wechselrichter Ost AC-Leistung", "W", "power"),
-        ("sensor.wechselrichter_west_ac_leistung", "Wechselrichter West AC-Leistung", "W", "power"),
-        ("sensor.wechselrichter_ost_energie_gesamt", "Wechselrichter Ost Energie gesamt", "kWh", "energy"),
+        ("sensor.wechselrichter_1_ac_leistung", "Wechselrichter 1 AC-Leistung", "W", "power"),
+        ("sensor.wechselrichter_2_ac_leistung", "Wechselrichter 2 AC-Leistung", "W", "power"),
+        ("sensor.wechselrichter_2_energie_gesamt", "Wechselrichter 2 Energie gesamt", "kWh", "energy"),
         ("sensor.hausverbrauch", "Hausverbrauch", "W", "power"),
         ("sensor.netzleistung", "Netzleistung", "W", "power"),
         ("sensor.batterie_ladezustand", "Batterie Ladezustand", "%", "percent"),
@@ -55,10 +55,11 @@ def _cloud_series(start: int, hours: int, rnd: random.Random) -> list[float]:
 def populate(hub) -> None:
     settings, db = hub.settings, hub.db
     if not settings.arrays:
-        settings.upsert_array({"name": "Dach Ost", "kwp": 6.5, "tilt": 35, "azimuth": 95,
-                               "sensor": "sensor.wechselrichter_ost_ac_leistung"})
-        settings.upsert_array({"name": "Dach West", "kwp": 5.2, "tilt": 35, "azimuth": 275,
-                               "sensor": "sensor.wechselrichter_west_ac_leistung"})
+        settings.upsert_array({"name": "Hausdach Süd", "planes": [{"kwp": 6.5, "tilt": 35, "azimuth": 185}],
+                               "sensor": "sensor.wechselrichter_1_ac_leistung"})
+        settings.upsert_array({"name": "Garage Ost-West", "sensor": "sensor.wechselrichter_2_ac_leistung",
+                               "planes": [{"kwp": 2.6, "tilt": 15, "azimuth": 95},
+                                          {"kwp": 2.6, "tilt": 15, "azimuth": 275}]})
         settings.update({"sensors": {"house": "sensor.hausverbrauch", "grid": "sensor.netzleistung",
                                      "battery_soc": "sensor.batterie_ladezustand",
                                      "battery_power": "sensor.batterie_leistung"},

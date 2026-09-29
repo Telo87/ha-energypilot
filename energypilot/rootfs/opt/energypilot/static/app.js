@@ -703,19 +703,27 @@
     const known = opts.some((e) => e.entity_id === value);
     return `<option value="">– kein Sensor –</option>${value && !known ? `<option value="${esc(value)}" selected>${esc(value)}</option>` : ''}${opts.map((e) => `<option value="${esc(e.entity_id)}" ${e.entity_id === value ? 'selected' : ''}>${esc(e.name)} (${esc(e.state)} ${esc(e.unit)})${e.statistics ? '' : ' – keine Statistik'}</option>`).join('')}`;
   }
-  const COMPASS = [['N', 0], ['NO', 45], ['O', 90], ['SO', 135], ['S', 180], ['SW', 225], ['W', 270], ['NW', 315]];
-  const dirName = (az) => { const i = Math.round(((az % 360) + 360) % 360 / 45) % 8; return ['Nord', 'Nordost', 'Ost', 'Südost', 'Süd', 'Südwest', 'West', 'Nordwest'][i]; };
+  const COMPASS = [['Nord', 0], ['Nordost', 45], ['Ost', 90], ['Südost', 135], ['Süd', 180], ['Südwest', 225], ['West', 270], ['Nordwest', 315]];
+  const dirName = (az) => COMPASS[Math.round((((az % 360) + 360) % 360) / 45) % 8][0];
+  const planesText = (a) => (a.planes || []).map((p) => `${dirName(p.azimuth)} ${nf(p.kwp, 2)} kWp/${nf(p.tilt)}°`).join(' + ');
+  // one row per orientation (e.g. east and west string behind one inverter)
+  const planeRow = (p = {}) => `<div class="plane-row" data-plane>
+      <input class="input" data-k="kwp" type="number" step="0.01" min="0" value="${p.kwp ?? ''}" placeholder="kWp" aria-label="Leistung in kWp">
+      <input class="input" data-k="tilt" type="number" step="1" min="0" max="90" value="${p.tilt ?? 30}" aria-label="Neigung in Grad">
+      <div class="az"><select class="input" data-k="dir" aria-label="Himmelsrichtung">${COMPASS.map(([l, v]) => `<option value="${v}">${l}</option>`).join('')}<option value="">genau …</option></select>
+        <input class="input" data-k="azimuth" type="number" step="1" min="0" max="359" value="${p.azimuth ?? 180}" aria-label="Ausrichtung in Grad"></div>
+      <button type="button" class="icon-btn" data-del-plane title="Teilfläche entfernen">${ic('x')}</button></div>`;
 
   async function renderArrays(el) {
-    setHeader('Einstellungen', 'PV-Anlagen – eine pro Ausrichtung');
+    setHeader('Einstellungen', 'PV-Anlagen – eine pro Messsensor');
     const draw = () => {
       const arrays = S.settings.arrays;
       el.innerHTML = `<div class="card"><div class="card-head"><h2>PV-Anlagen <span class="sub">${arrays.length}</span></h2><button class="btn primary sm" id="addArr">${ic('plus')}Anlage hinzufügen</button></div>
         <div class="card-body flush"><div class="list">${arrays.map((a) => `<div class="list-item clickable" data-edit="${a.id}">
             <div class="avatar accent">${ic('solar')}</div>
-            <div class="grow"><div class="title">${esc(a.name)}</div><div class="meta">${nf(a.kwp, 2)} kWp · ${nf(a.tilt)}° Neigung · ${dirName(a.azimuth)} (${nf(a.azimuth)}°)${a.ac_max_kw ? ` · max. ${nf(a.ac_max_kw, 1)} kW` : ''} · ${a.sensor ? `<span class="mono">${esc(a.sensor)}</span>` : '<span class="pos">kein Messsensor</span>'}</div></div>
+            <div class="grow"><div class="title">${esc(a.name)}</div><div class="meta">${nf(a.kwp, 2)} kWp · ${planesText(a)}${a.ac_max_kw ? ` · max. ${nf(a.ac_max_kw, 1)} kW` : ''} · ${a.sensor ? `<span class="mono">${esc(a.sensor)}</span>` : '<span class="pos">kein Messsensor</span>'}</div></div>
             <button class="icon-btn" title="Bearbeiten">${ic('edit')}</button></div>`).join('')
-          || '<div class="muted" style="padding:6px 18px 14px;font-size:13px">Noch keine Anlage. Lege für jede Dachfläche bzw. Ausrichtung eine eigene Anlage an – idealerweise mit dem Sensor des Wechselrichters, der genau diese Fläche misst.</div>'}</div></div></div>
+          || '<div class="muted" style="padding:6px 18px 14px;font-size:13px">Noch keine Anlage. Lege für jeden Messsensor (meist ein Wechselrichter) eine Anlage an. Zeigen Module an einem Wechselrichter in verschiedene Richtungen – z. B. ein String nach Osten, einer nach Westen –, trägst du sie als Teilflächen derselben Anlage ein.</div>'}</div></div></div>
         <div class="notice info" style="margin-top:16px">${ic('info')}<div><b>Messsensor:</b> Ein Leistungssensor (W/kW, z. B. „AC-Leistung“ des Fronius-Wechselrichters) oder ein Energiezähler (Wh/kWh). Er braucht eine Langzeitstatistik (state_class) – dann liest EnergyPilot die Erzeugung der letzten ${S.settings.backfill_days} Tage rückwirkend aus Home Assistant und kann die Prognosen sofort vergleichen.</div></div>`;
       $('#addArr').addEventListener('click', () => arrayForm());
       $$('[data-edit]').forEach((r) => r.addEventListener('click', () => arrayForm(S.settings.arrays.find((a) => a.id === r.dataset.edit))));
@@ -727,13 +735,15 @@
       modal({
         title: isNew ? 'PV-Anlage hinzufügen' : 'PV-Anlage bearbeiten',
         body: `<div class="form-grid">
-          <div class="field span-2"><label>Name</label><input class="input" id="a_name" value="${esc(cfg.name || '')}" placeholder="z. B. Dach Ost"></div>
-          <div class="field"><label>Leistung (kWp)</label><input class="input" id="a_kwp" type="number" step="0.01" min="0" value="${cfg.kwp ?? ''}" placeholder="z. B. 8,4"><span class="hint">Summe der Modul-Nennleistungen</span></div>
-          <div class="field"><label>Neigung (°)</label><input class="input" id="a_tilt" type="number" step="1" min="0" max="90" value="${cfg.tilt ?? 30}"><span class="hint">0° = flach, 90° = senkrecht</span></div>
-          <div class="field span-2"><label>Ausrichtung (°)</label><input class="input" id="a_az" type="number" step="1" min="0" max="359" value="${cfg.azimuth ?? 180}">
-            <div class="compass" id="a_comp">${COMPASS.map(([l, v]) => `<button type="button" data-az="${v}">${l}</button>`).join('')}</div><span class="hint" id="a_azh">Kompassrichtung, in die die Module zeigen: 90° = Ost, 180° = Süd, 270° = West</span></div>
-          <div class="field span-2"><label>Messsensor (Wechselrichter)</label><select class="input" id="a_sensor">${entityOptions(ents, cfg.sensor || '', ['power', 'energy'])}</select><span class="hint">Leistung (W/kW) oder Energiezähler (Wh/kWh) genau dieser Anlage</span></div>
+          <div class="field span-2"><label>Name</label><input class="input" id="a_name" value="${esc(cfg.name || '')}" placeholder="z. B. Hausdach oder Garage Ost-West"></div>
+          <div class="field span-2"><label>Messsensor (Wechselrichter)</label><select class="input" id="a_sensor">${entityOptions(ents, cfg.sensor || '', ['power', 'energy'])}</select><span class="hint">Leistung (W/kW) oder Energiezähler (Wh/kWh) – er misst alle Teilflächen unten zusammen</span></div>
         </div>
+        <div class="field"><label>Teilflächen</label>
+          <div class="plane-head"><span>Leistung (kWp)</span><span>Neigung (°)</span><span>Ausrichtung</span><span></span></div>
+          <div id="a_planes">${(cfg.planes && cfg.planes.length ? cfg.planes : [{}]).map((p) => planeRow(p)).join('')}</div>
+          <button type="button" class="btn sm" id="a_addPlane" style="align-self:flex-start">${ic('plus')}Teilfläche hinzufügen</button>
+          <span class="hint">Eine Zeile pro Ausrichtung – bei einem Ost-West-Dach an einem Wechselrichter also eine Zeile Ost und eine Zeile West. Neigung: 0° = flach, 90° = senkrecht.</span>
+          <div class="plane-sum" id="a_sum"></div></div>
         <details style="margin-bottom:6px"><summary class="muted" style="cursor:pointer;font-size:13px">Erweitert</summary>
           <div class="form-grid" style="margin-top:12px">
             <div class="field"><label>Systemwirkungsgrad (%)</label><input class="input" id="a_eff" type="number" step="1" min="50" max="100" value="${Math.round((cfg.efficiency ?? 0.88) * 100)}"><span class="hint">Wechselrichter, Kabel, Verschmutzung – typisch 85–90 %</span></div>
@@ -743,17 +753,48 @@
         foot: `${isNew ? '' : `<button class="btn danger left" id="a_del">${ic('trash')}Löschen</button>`}<button class="btn" data-close>Abbrechen</button><button class="btn primary" id="a_save">${ic('check')}Speichern</button>`,
         onMount(m, close) {
           const v = (id) => m.querySelector(id);
-          const syncComp = () => {
-            const az = Number(v('#a_az').value);
-            $$('#a_comp button', m).forEach((b) => b.classList.toggle('active', Number(b.dataset.az) === az));
-            v('#a_azh').textContent = `${dirName(az)} · 90° = Ost, 180° = Süd, 270° = West`;
+          const num = (x) => Number(String(x).replace(',', '.'));
+          const planes = () => $$('[data-plane]', m).map((r) => ({ kwp: num(r.querySelector('[data-k=kwp]').value), tilt: num(r.querySelector('[data-k=tilt]').value), azimuth: num(r.querySelector('[data-k=azimuth]').value) }));
+          // direction list and exact degrees stay in sync; "genau …" allows any other angle
+          const syncRow = (r) => {
+            const az = num(r.querySelector('[data-k=azimuth]').value);
+            const hit = COMPASS.find(([, d]) => d === az);
+            if (hit) r.querySelector('[data-k=dir]').value = String(hit[1]);
+            else r.querySelector('[data-k=dir]').value = '';
+            r.querySelector('.az').classList.toggle('exact', !hit);
           };
-          $$('#a_comp button', m).forEach((b) => b.addEventListener('click', () => { v('#a_az').value = b.dataset.az; syncComp(); }));
-          v('#a_az').addEventListener('input', syncComp);
-          syncComp();
+          const syncAll = () => {
+            const rows = $$('[data-plane]', m);
+            rows.forEach(syncRow);
+            rows.forEach((r) => { r.querySelector('[data-del-plane]').style.visibility = rows.length > 1 ? '' : 'hidden'; });
+            const total = planes().reduce((a, p) => a + (p.kwp > 0 ? p.kwp : 0), 0);
+            v('#a_sum').textContent = rows.length > 1 ? `Gesamt ${nf(total, 2)} kWp` : '';
+          };
+          const bindRow = (r) => {
+            r.querySelector('[data-k=dir]').addEventListener('change', (e) => {
+              if (e.target.value === '') { r.querySelector('.az').classList.add('exact'); r.querySelector('[data-k=azimuth]').focus(); return; }
+              r.querySelector('[data-k=azimuth]').value = e.target.value;
+              syncAll();
+            });
+            r.querySelector('[data-k=azimuth]').addEventListener('change', syncAll);
+            r.querySelector('[data-k=kwp]').addEventListener('input', syncAll);
+            r.querySelector('[data-del-plane]').addEventListener('click', () => { r.remove(); syncAll(); });
+          };
+          $$('[data-plane]', m).forEach(bindRow);
+          v('#a_addPlane').addEventListener('click', () => {
+            const last = planes().slice(-1)[0] || {};
+            // typical case: the other half of an east-west roof
+            const az = Number.isFinite(last.azimuth) ? (last.azimuth + 180) % 360 : 180;
+            v('#a_planes').insertAdjacentHTML('beforeend', planeRow({ kwp: last.kwp || '', tilt: Number.isFinite(last.tilt) ? last.tilt : 30, azimuth: az }));
+            const rows = $$('[data-plane]', m);
+            bindRow(rows[rows.length - 1]);
+            syncAll();
+          });
+          syncAll();
           v('#a_save').addEventListener('click', (e) => withBusy(e.currentTarget, async () => {
-            const body = { id: cfg.id, name: v('#a_name').value.trim(), kwp: v('#a_kwp').value, tilt: v('#a_tilt').value, azimuth: v('#a_az').value, sensor: v('#a_sensor').value, efficiency: Number(v('#a_eff').value) / 100, ac_max_kw: v('#a_ac').value || 0, solcast_id: v('#a_sc').value.trim() };
-            if (!(Number(String(body.kwp).replace(',', '.')) > 0)) { toast('Bitte die Leistung in kWp angeben.', 'err'); return; }
+            const pl = planes();
+            const body = { id: cfg.id, name: v('#a_name').value.trim(), planes: pl, sensor: v('#a_sensor').value, efficiency: Number(v('#a_eff').value) / 100, ac_max_kw: v('#a_ac').value || 0, solcast_id: v('#a_sc').value.trim() };
+            if (!pl.length || pl.some((p) => !(p.kwp > 0))) { toast('Bitte für jede Teilfläche die Leistung in kWp angeben.', 'err'); return; }
             try {
               await api('arrays', { method: 'POST', body });
               await loadSettings(); close(); draw();

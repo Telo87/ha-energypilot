@@ -21,17 +21,32 @@ MIN_COS_ZENITH = 0.0872  # 85° – limits the beam ratio near the horizon
 
 
 @dataclass(frozen=True)
-class Array:
-    """One PV array (one orientation)."""
+class Plane:
+    """Modules with one orientation (e.g. the east string of an east-west roof)."""
 
-    id: str
     kwp: float
     tilt: float = 30.0  # degrees from horizontal
     azimuth: float = 180.0  # compass degrees
+
+
+@dataclass(frozen=True)
+class Array:
+    """What one sensor measures: one or more planes behind one inverter."""
+
+    id: str
+    planes: tuple[Plane, ...]
     efficiency: float = 0.88  # inverter + cabling + soiling + mismatch
-    ac_max_kw: float = 0.0  # inverter limit, 0 = none
+    ac_max_kw: float = 0.0  # inverter limit for the sum of all planes, 0 = none
     albedo: float = 0.2
     gamma: float = -0.0037  # power temperature coefficient per K
+
+    @classmethod
+    def single(cls, id: str, kwp: float, tilt: float = 30.0, azimuth: float = 180.0, **kw) -> Array:
+        return cls(id, (Plane(kwp, tilt, azimuth),), **kw)
+
+    @property
+    def kwp(self) -> float:
+        return sum(p.kwp for p in self.planes)
 
 
 def sun_position(ts: float, lat: float, lon: float) -> tuple[float, float]:
@@ -81,15 +96,17 @@ def extraterrestrial(ts: float) -> float:
     return SOLAR_CONSTANT * (1 + 0.033 * math.cos(2 * math.pi * doy / 365.25))
 
 
-def _poa(ghi: float, bh: float, dhi: float, zen: float, sun_az: float, a: Array, e0: float) -> float:
+def _poa(
+    ghi: float, bh: float, dhi: float, zen: float, sun_az: float, p: Plane, albedo: float, e0: float
+) -> float:
     """Plane-of-array irradiance (W/m²) for one instant, Hay-Davies model."""
-    tilt = math.radians(a.tilt)
+    tilt = math.radians(p.tilt)
     cos_z = math.cos(math.radians(zen))
     cos_aoi = cos_z * math.cos(tilt) + math.sin(math.radians(zen)) * math.sin(tilt) * math.cos(
-        math.radians(sun_az - a.azimuth)
+        math.radians(sun_az - p.azimuth)
     )
     sky = (1 + math.cos(tilt)) / 2
-    ground = ghi * a.albedo * (1 - math.cos(tilt)) / 2
+    ground = ghi * albedo * (1 - math.cos(tilt)) / 2
     if cos_z <= 0.01 or bh <= 0:
         return dhi * sky + ground
     dni = bh / max(cos_z, MIN_COS_ZENITH)
@@ -104,15 +121,19 @@ def _poa(ghi: float, bh: float, dhi: float, zen: float, sun_az: float, a: Array,
     return beam + diffuse + ground
 
 
-def _dc_to_ac(poa: float, temp: float, a: Array) -> float:
-    """AC power in W for a plane-of-array irradiance."""
-    if poa <= 0:
-        return 0.0
-    t_cell = temp + poa / 32.0  # NOCT 45 °C
-    p = a.kwp * 1000 * poa / 1000 * (1 + a.gamma * (t_cell - 25)) * a.efficiency
+def _ac_power(ghi: float, bh: float, dhi: float, zen: float, az: float, temp: float, a: Array, e0: float) -> float:
+    """AC power in W of all planes of an array at one instant (clipped as a sum)."""
+    dc = 0.0
+    for p in a.planes:
+        poa = _poa(ghi, bh, dhi, zen, az, p, a.albedo, e0)
+        if poa <= 0:
+            continue
+        t_cell = temp + poa / 32.0  # NOCT 45 °C
+        dc += p.kwp * poa * (1 + a.gamma * (t_cell - 25))
+    ac = dc * a.efficiency
     if a.ac_max_kw > 0:
-        p = min(p, a.ac_max_kw * 1000)
-    return max(0.0, p)
+        ac = min(ac, a.ac_max_kw * 1000)
+    return max(0.0, ac)
 
 
 @lru_cache(maxsize=50000)
@@ -144,7 +165,7 @@ def pv_hour(start: int, ghi: float, dhi: float, temp: float, a: Array, lat: floa
             g, d = ghi * f, dhi * f
         else:  # sun below horizon all hour but light reported – diffuse only
             g, d = ghi, ghi
-        energy += _dc_to_ac(_poa(g, g - d, d, zen, az, a, e0), temp, a) * step / 3600
+        energy += _ac_power(g, g - d, d, zen, az, temp, a, e0) * step / 3600
     return energy
 
 
@@ -159,5 +180,5 @@ def clearsky_hour(start: int, a: Array, lat: float, lon: float) -> float:
             continue
         ghi = 1098 * cz * math.exp(-0.057 / cz)
         dhi = 0.15 * ghi
-        energy += _dc_to_ac(_poa(ghi, ghi - dhi, dhi, zen, az, a, e0), 20.0, a) * step / 3600
+        energy += _ac_power(ghi, ghi - dhi, dhi, zen, az, 20.0, a, e0) * step / 3600
     return energy

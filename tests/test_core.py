@@ -7,7 +7,7 @@ from energypilot.config import Options, Settings, clean_array
 from energypilot.db import Database
 from energypilot.ha import HomeAssistant
 from energypilot.hub import Hub
-from energypilot.solar import Array, clearsky_hour, pv_hour, sun_position
+from energypilot.solar import Array, Plane, clearsky_hour, pv_hour, sun_position
 from energypilot.sources import forecastsolar, openmeteo, prices, solcast
 
 from energypilot import analysis
@@ -38,26 +38,26 @@ def day_energy(a: Array, month: int) -> float:
 
 
 def test_clearsky_yield_plausible():
-    south = Array("s", 10, 30, 180)
+    south = Array.single("s", 10, 30, 180)
     assert 60 < day_energy(south, 6) < 80
     assert 15 < day_energy(south, 12) < 30
 
 
 def test_east_west_are_mirrored():
-    east = day_energy(Array("e", 10, 30, 90), 6)
-    west = day_energy(Array("w", 10, 30, 270), 6)
+    east = day_energy(Array.single("e", 10, 30, 90), 6)
+    west = day_energy(Array.single("w", 10, 30, 270), 6)
     assert east == pytest.approx(west, rel=0.05)
 
 
 def test_east_array_peaks_in_the_morning():
-    east = Array("e", 10, 30, 90)
+    east = Array.single("e", 10, 30, 90)
     morning = pv_hour(utc(2026, 6, 21, 6, 0), 600, 150, 20, east, LAT, LON)
     evening = pv_hour(utc(2026, 6, 21, 15, 0), 600, 150, 20, east, LAT, LON)
     assert morning > evening * 1.5
 
 
 def test_pv_hour_zero_without_light_and_clipping():
-    a = Array("x", 10, 30, 180, ac_max_kw=3)
+    a = Array.single("x", 10, 30, 180, ac_max_kw=3)
     assert pv_hour(utc(2026, 6, 21, 11, 0), 0, 0, 20, a, LAT, LON) == 0
     assert pv_hour(utc(2026, 6, 21, 11, 0), 900, 100, 20, a, LAT, LON) <= 3000 + 1e-6
 
@@ -140,16 +140,45 @@ def test_best_source_needs_enough_days():
 
 # -------------------------------------------------------------- settings/hub
 def test_clean_array_limits_and_entity(tmp_path):
-    a = clean_array({"name": " Ost ", "kwp": "8,4", "tilt": 120, "azimuth": 450, "sensor": "bad value"})
-    assert a["kwp"] == 8.4 and a["tilt"] == 90 and a["azimuth"] == 90 and a["sensor"] == ""
+    a = clean_array({"name": " Ost ", "planes": [{"kwp": "8,4", "tilt": 120, "azimuth": 450}, {"kwp": 0}],
+                     "sensor": "bad value"})
+    assert a["planes"] == [{"kwp": 8.4, "tilt": 90, "azimuth": 90}] and a["kwp"] == 8.4 and a["sensor"] == ""
     s = Settings(tmp_path / "s.json")
-    s.upsert_array({"name": "West", "kwp": 5, "sensor": "sensor.pv_west"})
+    s.upsert_array({"name": "West", "planes": [{"kwp": 5, "azimuth": 270}], "sensor": "sensor.pv_west"})
     s.update({"sources": {"solcast_key": "secret", "models": ["icon_d2", "nope"]}})
     again = Settings(tmp_path / "s.json")
     assert again.arrays[0]["sensor"] == "sensor.pv_west"
     assert again.data["sources"]["models"] == ["icon_d2"]
     assert "solcast_key" not in again.public()["sources"]
     assert again.public()["sources"]["has_solcast_key"]
+
+
+def test_settings_of_version_010_are_migrated(tmp_path):
+    path = tmp_path / "s.json"
+    path.write_text('{"arrays": [{"id": "abc", "name": "Alt", "kwp": 6, "tilt": 25, "azimuth": 200, '
+                    '"efficiency": 0.9, "ac_max_kw": 0, "sensor": "sensor.pv", "solcast_id": ""}]}', "utf-8")
+    arr = Settings(path).arrays[0]
+    assert arr["id"] == "abc" and arr["kwp"] == 6
+    assert arr["planes"] == [{"kwp": 6, "tilt": 25, "azimuth": 200}]
+    assert "tilt" not in arr and "azimuth" not in arr
+
+
+def test_east_west_array_has_two_humps():
+    ew = Array("ew", (Plane(5, 20, 90), Plane(5, 20, 270)))
+    day = utc(2026, 6, 21, 0, 0)
+    hours = [clearsky_hour(day + h * 3600, ew, LAT, LON) for h in range(24)]
+    south = Array.single("s", 10, 20, 180)
+    south_hours = [clearsky_hour(day + h * 3600, south, LAT, LON) for h in range(24)]
+    # flatter, wider curve: more in the morning, less at noon than the same kWp facing south
+    assert hours[4] > south_hours[4] and hours[11] < south_hours[11]
+    east_only = sum(clearsky_hour(day + h * 3600, Array.single("e", 5, 20, 90), LAT, LON) for h in range(24))
+    west_only = sum(clearsky_hour(day + h * 3600, Array.single("w", 5, 20, 270), LAT, LON) for h in range(24))
+    assert sum(hours) == pytest.approx(east_only + west_only, rel=1e-9)
+
+
+def test_inverter_limit_applies_to_the_sum():
+    ew = Array("ew", (Plane(5, 30, 180), Plane(5, 30, 180)), ac_max_kw=6)
+    assert pv_hour(utc(2026, 6, 21, 11, 0), 900, 100, 20, ew, LAT, LON) <= 6000 + 1e-6
 
 
 def test_horizons(tmp_path):

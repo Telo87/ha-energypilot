@@ -28,6 +28,6 @@ async def fetch(
     session: aiohttp.ClientSession, lat: float, lon: float, tilt: float, azimuth: float, kwp: float
 ) -> dict[int, float]:
     # Forecast.Solar: 0 = south, -90 = east, 90 = west
-    az = round(((azimuth - 180 + 180) % 360) - 180)
+    az = round(azimuth % 360 - 180)
     url = URL.format(lat=lat, lon=lon, dec=round(tilt), az=az, kwp=round(kwp, 2))
     return parse(await get_json(session, url, {"time": "iso8601"}))

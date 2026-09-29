@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+- Neu: **Teilflächen** – eine Anlage kann mehrere Ausrichtungen haben, z. B. Ost und West an einem Wechselrichter mit nur einem Gesamtwert. Jede Teilfläche wird einzeln berechnet (Wettermodelle und Forecast.Solar), verglichen wird die Summe mit dem Sensor
+- Wechselrichter-Grenze gilt für die Summe aller Teilflächen
+- Ausrichtung per Himmelsrichtung wählbar oder genau in Grad; „Teilfläche hinzufügen“ schlägt die Gegenrichtung vor
+- Bestehende Anlagen werden automatisch übernommen
+
 ## 0.1.0
 
 - Erste Version: **Datengrundlage für die Energieoptimierung**

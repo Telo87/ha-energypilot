@@ -8,11 +8,9 @@ Heizstab bauen darauf auf.
 ## Erste Schritte
 
 1. Add-on starten und **Web-UI öffnen**.
-2. Unter **Einstellungen › PV-Anlagen** jede Dachfläche bzw. Ausrichtung als eigene Anlage anlegen:
-   - **Leistung (kWp):** Summe der Modul-Nennleistungen.
-   - **Neigung:** 0° = flach, 90° = senkrecht.
-   - **Ausrichtung:** Kompassrichtung, 90° = Ost, 180° = Süd, 270° = West.
-   - **Messsensor:** Sensor des Wechselrichters, der genau diese Fläche misst. Beim Fronius ist das z. B. die AC-Leistung (W) oder der Energiezähler (kWh).
+2. Unter **Einstellungen › PV-Anlagen** für jeden Messsensor, meist einen Wechselrichter, eine Anlage anlegen:
+   - **Messsensor:** Sensor des Wechselrichters, z. B. die AC-Leistung (W) oder der Energiezähler (kWh) des Fronius.
+   - **Teilflächen:** eine Zeile pro Ausrichtung mit Leistung (kWp), Neigung (0° = flach, 90° = senkrecht) und Ausrichtung (Ost, Süd, West … oder genau in Grad, 90° = Ost, 180° = Süd, 270° = West).
 3. Unter **Strompreis** die festen Preisbestandteile deines Tarifs eintragen (siehe unten).
 4. Optional unter **Sensoren & Standort** Hausverbrauch, Netzleistung und Batterie auswählen.
 
@@ -33,22 +31,29 @@ ohne Statistik markiert. Unterstützt werden:
 - Leistung in W oder kW (EnergyPilot nutzt den Stundenmittelwert),
 - Energie in Wh oder kWh (Zählerstand, EnergyPilot nutzt die Änderung pro Stunde).
 
-Misst ein Wechselrichter mehrere Ausrichtungen gemeinsam, lege eine Anlage je Ausrichtung ohne
-Sensor an und dazu eine weitere mit dem Sensor. Besser ist es, wenn die MPPT-Tracker bzw. Strings
-einzeln als Sensor vorhanden sind.
+### Ost-West-Anlagen und mehrere Ausrichtungen an einem Wechselrichter
+
+Zeigt ein String nach Osten und einer nach Westen, der Wechselrichter meldet aber nur einen
+Gesamtwert, legst du **eine** Anlage mit diesem Sensor an und trägst **zwei Teilflächen** ein
+(Ost und West, jeweils mit ihrer kWp-Leistung). EnergyPilot rechnet jede Teilfläche einzeln und
+vergleicht die Summe mit dem Sensor. Die Wechselrichter-Grenze (Erweitert) gilt dabei für die Summe.
+
+Liefert der Wechselrichter die Strings einzeln (z. B. Spannung und Strom je MPPT-Eingang), kannst du
+in Home Assistant je String einen Leistungssensor anlegen und daraus zwei getrennte Anlagen machen.
+Dann zeigt der Prognose-Check sogar, welches Modell Osten und Westen jeweils besser trifft.
 
 ## Prognosequellen
 
 | Quelle | Kosten | Zeitraum | Archiv |
 |---|---|---|---|
 | Open-Meteo: DWD ICON-D2, ICON-EU, ECMWF, GFS, Météo-France, KNMI, UK Met Office, „Auto“ | kostenlos | bis 3 Tage | ja |
-| Forecast.Solar | kostenlos (12 Abrufe/Stunde) | heute + morgen | nein |
+| Forecast.Solar | kostenlos (12 Abrufe/Stunde, ein Abruf je Teilfläche) | heute + morgen | nein |
 | Solcast (Hobby-Zugang) | kostenlos mit Anmeldung (10 Abrufe/Tag) | 3 Tage | nein |
 
 Bei den Open-Meteo-Modellen berechnet EnergyPilot die PV-Leistung selbst. Die Global- und
 Diffusstrahlung wird auf die Modulebene umgerechnet (Hay-Davies-Modell, Sonnenstand in
 10-Minuten-Schritten), danach werden Temperaturverluste und der Systemwirkungsgrad abgezogen. Wenn du
-Neigung oder Ausrichtung einer Anlage änderst, berechnet EnergyPilot alle gespeicherten Prognosen
+die Teilflächen einer Anlage änderst, berechnet EnergyPilot alle gespeicherten Prognosen
 sofort neu.
 
 ### Prognose-Horizonte

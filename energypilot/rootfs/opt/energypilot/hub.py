@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 
 ARCHIVE_CHUNK_DAYS = 92
 LIVE_INTERVAL = 15
-GEOMETRY_KEYS = ("kwp", "tilt", "azimuth", "efficiency", "ac_max_kw")
+GEOMETRY_KEYS = ("planes", "efficiency", "ac_max_kw")
 POWER_UNITS = {"W": 1.0, "kW": 1000.0, "MW": 1e6}
 
 
@@ -244,10 +244,15 @@ class Hub:
         if src["forecast_solar"]:
             for cfg, _arr in arrays:
                 key = "fs"
+                # one call per plane, summed – a partial sum would look like a bad forecast
+                hours: dict[int, float] = {}
                 try:
-                    hours = await forecastsolar.fetch(
-                        self.session, lat, lon, cfg["tilt"], cfg["azimuth"], cfg["kwp"]
-                    )
+                    for plane in cfg["planes"]:
+                        part = await forecastsolar.fetch(
+                            self.session, lat, lon, plane["tilt"], plane["azimuth"], plane["kwp"]
+                        )
+                        for t, wh in part.items():
+                            hours[t] = hours.get(t, 0.0) + wh
                 except SourceError as err:
                     self.mark(key, False, f"{cfg['name']}: {err}")
                     continue

@@ -574,9 +574,14 @@ svg.i.flip { transform: scaleX(-1); }
 .progress > i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width .4s; }
 .day-nav { display: flex; align-items: center; gap: 6px; }
 .day-nav input[type=date] { width: auto; }
-.compass { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
-.compass button { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 5px 0; font-size: 12.5px; cursor: pointer; color: var(--text-2); }
-.compass button.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 650; }
 .models { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px 16px; margin: 12px 0 4px; }
 .explain { font-size: 13px; color: var(--text-2); margin: 0 0 12px; }
 .explain b { color: var(--text); }
+.plane-head, .plane-row { display: grid; grid-template-columns: 1fr 1fr 1.6fr 34px; gap: 8px; align-items: center; }
+.plane-head { font-size: 11.5px; color: var(--text-3); font-weight: 600; }
+.plane-row { margin-bottom: 2px; }
+.plane-row .az { display: grid; grid-template-columns: 1fr; gap: 6px; }
+.plane-row .az.exact { grid-template-columns: 1fr 72px; }
+.plane-row .az:not(.exact) [data-k=azimuth] { display: none; }
+.plane-sum { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+@media (max-width: 560px) { .plane-head { display: none; } .plane-row { grid-template-columns: 1fr 1fr 34px; } .plane-row .az { grid-column: 1 / 3; grid-row: 2; } }
