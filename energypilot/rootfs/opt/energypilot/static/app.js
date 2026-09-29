@@ -195,7 +195,15 @@
 
   // Source colours: fixed per source (identity follows the entity, never its rank)
   const SRC_SLOT = { 'om:best_match': 1, 'om:icon_d2': 2, 'om:ecmwf_ifs025': 3, fs: 4, 'om:icon_eu': 5, 'om:gfs_seamless': 6, 'om:meteofrance_seamless': 7, sc: 8 };
-  const srcColor = (s) => (SRC_SLOT[s] ? `var(--s${SRC_SLOT[s]})` : 'var(--s-other)');
+  const srcColor = (s) => (s === 'ep' ? 'var(--text)' : SRC_SLOT[s] ? `var(--s${SRC_SLOT[s]})` : 'var(--s-other)');
+  const BASE = 'base';
+  // series picker: all arrays, each array, household base load
+  function seriesSelect(id, cur, arrays) {
+    const opts = arrays.length > 1 ? [['_total', 'Alle Anlagen'], ...arrays.map((a) => [a.id, a.name])] : arrays.length ? [['_total', arrays[0].name]] : [];
+    if (S.settings && S.settings.sensors.house) opts.push([BASE, 'Grundverbrauch']);
+    if (opts.length < 2) return '';
+    return `<select class="input" id="${id}" style="width:auto">${opts.map(([v, l]) => `<option value="${esc(v)}" ${cur === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  }
   const CLASS_LABEL = { sunny: ['Sonnig', 'sun'], mixed: ['Wechselhaft', 'cloudSun'], cloudy: ['Trüb', 'cloud'] };
   const HORIZONS = [['d1', 'Vortag', 'Prognose vom Vortag (vor Mitternacht) – die Grundlage für die Planung des nächsten Tages'], ['d0', 'Kurzfristig', 'Letzte Prognose vor der jeweiligen Stunde']];
 
@@ -443,7 +451,7 @@
       const wu = (v) => (v == null ? '' : Math.abs(v) >= 1000 ? 'kW' : 'W');
       const kpis = [
         kpi('pv', 'solar', 'warn', 'PV-Leistung', w('pv', pvNow), wu(pvNow), pvVals.length ? ov.arrays.map((a) => `${esc(a.name)} ${fmtW(val(`pv:${a.id}`))}`).join(' · ') : missing()),
-        kpi('house', 'home', '', 'Hausverbrauch', w('house', val('house')), wu(val('house')), lv.house ? 'aktuell' : missing()),
+        kpi('house', 'home', '', 'Hausverbrauch', w('house', val('house')), wu(val('house')), lv.house ? (ov.load ? `Grundverbrauch heute ~${nf(ov.load.today, 1)} kWh · morgen ~${nf(ov.load.tomorrow, 1)} kWh` : 'aktuell') : missing()),
         kpi('grid', 'plug', grid != null && grid < 0 ? 'ok' : '', grid != null && grid < 0 ? 'Einspeisung' : 'Netzbezug', w('grid', grid == null ? null : Math.abs(grid)), wu(grid), lv.grid ? (grid > 0 ? 'Strom wird gekauft' : grid < 0 ? 'Überschuss geht ins Netz' : 'ausgeglichen') : missing()),
         kpi('batt', 'battery', 'ok', 'Batterie', soc == null ? '–' : cnt('soc', nf(soc, 0)), soc == null ? '' : '%', bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'),
         kpi('price', 'euro', pr && avg != null && pr.price <= avg ? 'ok' : 'warn', 'Strompreis jetzt', pr ? cnt('price', nf(pr.price, 1)) : '–', pr ? 'ct/kWh' : '', pr ? `Börse ${nf(pr.spot, 1)} ct · Ø heute ${nf(avg, 1)} ct` : 'noch keine Preise'),
@@ -504,6 +512,28 @@
     });
   }
 
+  // How the own forecast currently combines the sources (per array)
+  function modelCard(model) {
+    const arrays = (S.settings ? S.settings.arrays : []).filter((a) => model && model[a.id]);
+    if (!arrays.length) return '';
+    const hourChips = (f) => {
+      const notable = Object.entries(f).filter(([, v]) => Math.abs(v - 1) >= 0.03);
+      if (!notable.length) return '<span class="faint">keine nennenswerte Korrektur nötig</span>';
+      return notable.map(([h, v]) => `<span class="badge ${v < 1 ? 'warn' : 'accent'}" title="${h}:00–${Number(h) + 1}:00 Uhr">${h} Uhr ${signed((v - 1) * 100, 0)} %</span>`).join(' ');
+    };
+    return `<div class="card"><div class="card-head"><h2>So rechnet die eigene Prognose <span class="sub">gelernt aus den letzten ${model[arrays[0].id].days} Tagen</span></h2></div>
+      <div class="card-body"><p class="explain">EnergyPilot gewichtet jede Quelle danach, wie gut sie bei dieser Anlage zuletzt lag (je nach erwarteter Wetterlage unterschiedlich), und korrigiert das Ergebnis je Uhrzeit – z. B. wenn morgens ein Baum Schatten wirft oder der Wechselrichter mittags abregelt. Neu gelernt wird jede Stunde.</p>
+      <div class="grid cols-2">${arrays.map((a) => {
+        const m = model[a.id];
+        const w = Object.entries(m.weights).sort((x, y) => y[1] - x[1]);
+        return `<div><div style="font-weight:650;margin-bottom:8px">${esc(a.name)}</div>
+          ${w.map(([src, share]) => `<div class="row" style="gap:10px;margin-bottom:6px;font-size:13px"><span class="swatch-dot" style="background:${srcColor(src)}"></span><span style="width:130px" class="nowrap">${esc(sourceName(src))}</span><div class="bar" style="flex:1"><i style="width:${Math.round(share * 100)}%;background:${srcColor(src)}"></i></div><b class="num" style="width:44px;text-align:right">${pct(share * 100, 0)}</b></div>`).join('')}
+          <div style="font-size:12.5px;margin-top:10px;line-height:2"><span class="muted">Korrektur nach Uhrzeit:</span> ${hourChips(m.factors)}</div></div>`;
+      }).join('')}</div></div></div>`;
+  }
+  const SOURCE_NAMES = { 'om:best_match': 'Open-Meteo Auto', 'om:icon_d2': 'DWD ICON-D2', 'om:icon_eu': 'DWD ICON-EU', 'om:ecmwf_ifs025': 'ECMWF IFS', 'om:gfs_seamless': 'NOAA GFS', 'om:meteofrance_seamless': 'Météo-France', 'om:knmi_seamless': 'KNMI Harmonie', 'om:ukmo_seamless': 'UK Met Office', fs: 'Forecast.Solar', sc: 'Solcast', ep: 'EnergyPilot (lernend)', lw: 'Wie vor einer Woche' };
+  const sourceName = (src) => SOURCE_NAMES[src] || src;
+
   // --------------------------------------------------------------- accuracy
   async function renderAccuracy(el, token) {
     const cfg = { days: 30, horizon: 'd1', series: '_total', common: false, ...store.get('acc', {}) };
@@ -519,12 +549,14 @@
     const toolbar = () => `<div class="toolbar">
         <div class="seg" id="accDays">${[[7, '7 Tage'], [14, '14 Tage'], [30, '30 Tage'], [90, '90 Tage'], [365, '1 Jahr']].map(([d, l]) => `<button data-v="${d}" class="${cfg.days === d ? 'active' : ''}">${l}</button>`).join('')}</div>
         <div class="seg" id="accHz">${HORIZONS.map(([k, l, t]) => `<button data-v="${k}" title="${esc(t)}" class="${cfg.horizon === k ? 'active' : ''}">${l}</button>`).join('')}</div>
-        ${arrays.length > 1 ? `<select class="input" id="accSeries" style="width:auto"><option value="_total">Alle Anlagen</option>${arrays.map((a) => `<option value="${a.id}" ${cfg.series === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>` : ''}
+        ${seriesSelect('accSeries', cfg.series, arrays)}
         <label class="check" title="Nur Stunden vergleichen, für die alle Quellen einen Wert haben – fairer, wenn Quellen unterschiedlich lange gesammelt wurden"><input type="checkbox" id="accCommon" ${cfg.common ? 'checked' : ''}>Nur gemeinsame Stunden</label>
       </div>`;
     const draw = (d) => {
       setHeader('Prognose-Check', `${new Date(d.start * 1000).toLocaleDateString('de-DE')} – ${new Date((d.end - 1) * 1000).toLocaleDateString('de-DE')} · ${HORIZONS.find((h) => h[0] === cfg.horizon)[2]}`);
       const res = d.results;
+      const isLoad = cfg.series === BASE;
+      const what = isLoad ? 'Tagesverbrauch' : 'Tagesertrag';
       if (!res.length) {
         el.innerHTML = `${toolbar()}<div class="card"><div class="card-body">${empty('target', 'Noch nichts zu vergleichen', 'Für den Vergleich braucht es Messwerte der PV-Anlagen (Sensor mit Langzeitstatistik, siehe Einstellungen) und Prognosen für denselben Zeitraum. Das Archiv der Wettermodelle wird beim ersten Start automatisch nachgeladen – das dauert ein paar Minuten.')}</div></div>`;
         bind(); return;
@@ -558,11 +590,12 @@
       const lines = all.sort((a, b) => ranking.indexOf(a) - ranking.indexOf(b)).map((s) => ({ key: s, label: d.labels[s], color: srcColor(s) }));
       el.innerHTML = `${toolbar()}
         <div class="card"><div class="card-head"><h2>Rangliste</h2></div>
-          <div class="card-body flush"><p class="explain" style="padding:0 18px">${ic('trophy')} Am genauesten: <b>${esc(res[0].label)}</b> – im Mittel ${pct(res[0].day_nmae_pct)} Abweichung beim Tagesertrag.
-            <span class="faint">Genauigkeit = 100 % minus mittlerer Stundenfehler relativ zur Erzeugung. Tagesabweichung = Fehler beim Tagesertrag. Summe = systematische Über- (+) oder Unterschätzung.</span></p>
+          <div class="card-body flush"><p class="explain" style="padding:0 18px">${ic('trophy')} Am genauesten: <b>${esc(res[0].label)}</b> – im Mittel ${pct(res[0].day_nmae_pct)} Abweichung beim ${what}.
+            <span class="faint">Genauigkeit = 100 % minus mittlerer Stundenfehler relativ zum Messwert. Tagesabweichung = Fehler beim ${what}. Summe = systematische Über- (+) oder Unterschätzung.${isLoad ? ' Grundverbrauch = Hausverbrauch ohne E-Auto und Heizstab; „Wie vor einer Woche“ ist der Vergleichsmaßstab.' : ''}</span></p>
           <div class="table-wrap"><table class="table"><thead><tr><th></th><th>Quelle</th><th>Genauigkeit</th><th class="num">Tagesabw. Ø</th><th class="num">Summe</th><th class="num">Größter Tagesfehler</th><th class="num hide-md">Stundenfehler Ø</th><th class="num hide-md">RMSE</th><th class="num">Tage</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
+        ${isLoad ? '' : modelCard(d.model)}
         ${classTable}
-        <div class="card"><div class="card-head"><h2>Tageserträge <span class="sub">Klick auf einen Tag zeigt den Stundenverlauf</span></h2></div>
+        <div class="card"><div class="card-head"><h2>${isLoad ? 'Tagesverbrauch' : 'Tageserträge'} <span class="sub">Klick auf einen Tag zeigt den Stundenverlauf</span></h2></div>
           <div class="card-body">${legendHTML(MEASURED, lines, hidden)}<div class="chart tall" id="dailyChart"></div></div></div>`;
       const days = d.daily.days;
       chart($('#dailyChart'), {
@@ -613,10 +646,10 @@
       el.innerHTML = `<div class="toolbar">
           <div class="day-nav"><button class="icon-btn" id="dPrev" title="Vorheriger Tag">${ic('chevronL')}</button><input class="input" type="date" id="dPick" value="${day}"><button class="icon-btn" id="dNext" title="Nächster Tag">${ic('chevron')}</button>${day !== today ? `<button class="btn sm" id="dToday">Heute</button>` : ''}</div>
           <div class="seg" id="dHz">${HORIZONS.map(([k, l, t]) => `<button data-v="${k}" title="${esc(t)}" class="${cfg.horizon === k ? 'active' : ''}">${l}</button>`).join('')}</div>
-          ${arrays.length > 1 ? `<select class="input" id="dSeries" style="width:auto"><option value="_total">Alle Anlagen</option>${arrays.map((a) => `<option value="${a.id}" ${cfg.series === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>` : ''}
+          ${seriesSelect('dSeries', cfg.series, arrays)}
         </div>
         <div class="grid dash">
-          <div class="card"><div class="card-head"><h2>PV-Erzeugung <span class="sub">stündlich</span></h2></div>
+          <div class="card"><div class="card-head"><h2>${cfg.series === BASE ? 'Grundverbrauch <span class="sub">stündlich, ohne E-Auto und Heizstab</span>' : 'PV-Erzeugung <span class="sub">stündlich</span>'}</h2></div>
             <div class="card-body">${legendHTML(MEASURED, lines, hidden)}<div class="chart tall" id="dayChart"></div></div></div>
           <div class="card"><div class="card-head"><h2>Tagessumme</h2></div><div class="card-body flush">
             <div class="list"><div class="list-item"><span class="swatch-dot" style="background:var(--measured);opacity:.6"></span><div class="grow"><div class="title">Gemessen</div><div class="meta">${actSum == null ? 'keine Messwerte' : 'volle Stunden'}</div></div><b class="num">${kwh(actSum)}</b></div>
@@ -883,10 +916,12 @@
     const s = S.settings.sensors; const loc = S.settings.location; const ha = S.settings.ha_location;
     el.innerHTML = `<div class="grid cols-2">
       <div class="card"><div class="card-head"><div class="avatar accent">${ic('sliders')}</div><h2>Sensoren</h2></div><div class="card-body">
-        <div class="field"><label>Hausverbrauch</label><select class="input" id="n_house">${entityOptions(ents, s.house, ['power', 'energy'])}</select><span class="hint">Gesamtverbrauch des Hauses – Grundlage der späteren Verbrauchsprognose</span></div>
+        <div class="field"><label>Hausverbrauch</label><select class="input" id="n_house">${entityOptions(ents, s.house, ['power', 'energy'])}</select><span class="hint">Gesamtverbrauch des Hauses (inklusive E-Auto und Heizstab) – Grundlage der Verbrauchsprognose</span></div>
         <div class="field"><label>Netzleistung</label><select class="input" id="n_grid">${entityOptions(ents, s.grid, ['power'])}</select><span class="hint">Vom Smartmeter: positiv = Bezug, negativ = Einspeisung</span></div>
         <div class="field"><label>Batterie Ladezustand</label><select class="input" id="n_soc">${entityOptions(ents, s.battery_soc, ['percent'])}</select></div>
         <div class="field"><label>Batterie Leistung</label><select class="input" id="n_bp">${entityOptions(ents, s.battery_power, ['power'])}</select><span class="hint">positiv = Laden, negativ = Entladen</span></div>
+        <div class="field"><label>E-Auto / Wallbox</label><select class="input" id="n_ev">${entityOptions(ents, s.ev || '', ['power', 'energy'])}</select><span class="hint">Ladeleistung oder Ladezähler, z. B. aus evcc</span></div>
+        <div class="field"><label>Heizstab</label><select class="input" id="n_heater">${entityOptions(ents, s.heater || '', ['power', 'energy'])}</select><span class="hint">E-Auto und Heizstab werden vom Hausverbrauch abgezogen – die Verbrauchsprognose lernt nur den Grundverbrauch, die beiden plant EnergyPilot später gezielt.</span></div>
       </div></div>
       <div class="card"><div class="card-head"><div class="avatar accent">${ic('compass')}</div><h2>Standort</h2></div><div class="card-body">
         <p class="explain">Standardmäßig wird der Standort aus Home Assistant verwendet${ha ? ` (${nf(ha[0], 3)}, ${nf(ha[1], 3)})` : ''}. Nur ausfüllen, wenn die Anlage woanders steht.</p>
@@ -896,7 +931,7 @@
       </div></div></div>
       <div class="row" style="margin-top:16px"><button class="btn primary" id="n_save">${ic('check')}Speichern</button></div>`;
     $('#n_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({
-      sensors: { house: $('#n_house').value, grid: $('#n_grid').value, battery_soc: $('#n_soc').value, battery_power: $('#n_bp').value },
+      sensors: { house: $('#n_house').value, grid: $('#n_grid').value, battery_soc: $('#n_soc').value, battery_power: $('#n_bp').value, ev: $('#n_ev').value, heater: $('#n_heater').value },
       location: { latitude: $('#n_lat').value, longitude: $('#n_lon').value },
     })));
   }

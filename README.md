@@ -1,25 +1,26 @@
 # EnergyPilot – Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-0.1.1-blue)
+![Version](https://img.shields.io/badge/version-0.2.0-blue)
 
 Welche PV-Prognose stimmt bei **deinem** Dach? EnergyPilot sammelt stündlich die Prognosen mehrerer
 Wetterdienste, vergleicht sie mit der tatsächlichen Erzeugung jeder Anlage und zeigt dynamische
 Strompreise. Auf dieser Grundlage folgen eine eigene, lernende Prognose und die Steuerung von
 Batterie, E-Auto und Heizstab.
 
-## Funktionen (0.1)
+## Funktionen
 
 - **Mehrere PV-Anlagen** mit eigenem Messsensor, auch mit mehreren Ausrichtungen an einem Wechselrichter (z. B. Ost-West)
 - **Prognosequellen:** DWD ICON-D2 und ICON-EU, ECMWF, NOAA GFS, Météo-France und weitere über Open-Meteo (kostenlos), Forecast.Solar, optional Solcast
 - **Sofortiger Rückblick:** Messwerte aus der Langzeitstatistik von Home Assistant und archivierte Modellprognosen der letzten 90 Tage, die Rangliste steht nach wenigen Minuten
 - **Prognose-Check:** Genauigkeit je Quelle, für Vortag und kurzfristig, nach Wetterlage und je Anlage
 - **Strompreise:** EPEX Day-Ahead in Viertelstunden mit den Aufschlägen deines Tarifs (z. B. sonnen EnergyDynamic), günstigste Zeitfenster
-- **Sensoren** für Automationen: Strompreis, PV-Prognose heute und morgen, genaueste Quelle
+- **Eigene, lernende PV-Prognose:** gewichtet die Quellen nach ihrer Treffsicherheit bei deinen Anlagen und lernt Verschattung und Abregelung – und muss sich im Prognose-Check gegen die Wetterdienste behaupten
+- **Verbrauchsprognose** für den Grundverbrauch (ohne E-Auto und Heizstab) nach Uhrzeit, Wochentag und Temperatur
+- **Sensoren** für Automationen: Strompreis, PV-Prognose und Verbrauchsprognose heute und morgen, genaueste Quelle
 
 ## Geplant
 
-- Eigene Prognose, die aus allen Quellen und deinen Messwerten lernt (Bias-Korrektur je Anlage und Wetterlage)
-- Verbrauchsprognose aus dem Hausverbrauch
+- Energiebilanz für heute und morgen mit Batterie-Ladezustand
 - Planer: Batterie aus dem Netz laden, ja oder nein (sonnenBatterie), E-Auto-Ladeplan über evcc, Heizstab bei Überschuss
 - Live-Entscheidung „Strom kaufen oder nicht“
 

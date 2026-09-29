@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 
-from . import __version__, analysis
+from . import __version__, analysis, learn
 from .config import OPEN_METEO_MODELS, Options, Settings, to_array
 from .db import Database
 from .ha import HAError, HomeAssistant
@@ -28,7 +29,12 @@ POWER_UNITS = {"W": 1.0, "kW": 1000.0, "MW": 1e6}
 def source_label(key: str) -> str:
     if key.startswith("om:"):
         return OPEN_METEO_MODELS.get(key[3:], key[3:])
-    return {"fs": "Forecast.Solar", "sc": "Solcast"}.get(key, key)
+    return {
+        "fs": "Forecast.Solar",
+        "sc": "Solcast",
+        learn.PV_SOURCE: "EnergyPilot (lernend)",
+        learn.NAIVE_SOURCE: "Wie vor einer Woche",
+    }.get(key, key)
 
 
 class Hub:
@@ -50,6 +56,7 @@ class Hub:
         self._price_slot: int | None = None
         self._acc_cache: dict[tuple, tuple[float, dict]] = {}
         self._midnight: dict[str, int] = {}
+        self.model_info: dict[str, dict] = {}
 
     # ------------------------------------------------------------------ basics
     @property
@@ -164,6 +171,7 @@ class Hub:
             await self.fetch_forecasts()
             await self.update_actuals()
             await self.backfill_archive()
+            await self.run_learning()
             self._acc_cache.clear()
             await self.publish()
 
@@ -362,7 +370,7 @@ class Hub:
     def measured_series(self) -> dict[str, str]:
         out = {cfg["id"]: cfg["sensor"] for cfg in self.settings.arrays if cfg.get("sensor")}
         sensors = self.settings.data["sensors"]
-        for key in ("house", "grid"):
+        for key in ("house", "grid", "ev", "heater"):
             if sensors.get(key):
                 out[key] = sensors[key]
         return out
@@ -418,6 +426,100 @@ class Hub:
                     self.db.set_meta(f"actual:{sid}", str(now))
                     self.mark(f"act:{sid}", True, count=len(stats.get(sid, [])))
         self.mark("actual", True, count=total)
+
+    # ---------------------------------------------------------------- learning
+    async def run_learning(self) -> None:
+        try:
+            await asyncio.to_thread(self.learn)
+        except Exception as err:
+            _LOGGER.exception("Learning failed")
+            self.mark("learn", False, f"Lernen fehlgeschlagen: {err}")
+
+    def base_load(self, acts: dict[str, dict[int, float]]) -> dict[int, float]:
+        """Household consumption without EV and heating rod (Wh per hour)."""
+        sensors = self.settings.data["sensors"]
+        extra = [k for k in ("ev", "heater") if sensors.get(k)]
+        out = {}
+        for t, house in acts.get("house", {}).items():
+            parts = [acts.get(k, {}).get(t) for k in extra]
+            if any(v is None for v in parts):
+                continue
+            out[t] = max(0.0, house - sum(max(0.0, v) for v in parts))
+        return out
+
+    def daily_temps(self) -> dict[str, float]:
+        """Mean temperature per local day from the weather models (short-term forecast)."""
+        models = [m for m in ("best_match", *self.settings.data["sources"]["models"]) if m]
+        per: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        for model, target, horizon, _ghi, _dhi, temp, _issued in self.db.weather(list(dict.fromkeys(models))):
+            if horizon == "d0" and temp is not None:
+                per[model][self.day_key(target)].append(temp)
+        for model in models:  # first model with data wins
+            if per.get(model):
+                return {d: sum(v) / len(v) for d, v in per[model].items() if len(v) >= 20}
+        return {}
+
+    def learn(self) -> None:
+        """Walk-forward training of the own PV and base-load forecasts (runs in a thread)."""
+        now = int(time.time())
+        today = self.midnight(now)
+        end = self.midnight(self.midnight(today + 90000) + 90000)  # end of tomorrow
+        first = today - int(self.settings.data["backfill_days"]) * 86400
+        start = self.midnight(first - learn.TRAIN_DAYS * 86400 - 3600)
+        hours = range(start, end, 3600)
+        local = {t: datetime.fromtimestamp(t, self.tz) for t in hours}
+        days = sorted({local[t].strftime("%Y-%m-%d") for t in hours if t >= first})
+        acts: dict[str, dict[int, float]] = defaultdict(dict)
+        for series, t, wh in self.db.actuals(start, end):
+            acts[series][t] = wh
+        rows: list[tuple] = []
+        loc = self.location
+        info: dict[str, dict] = {}
+        if loc:
+            lat, lon = round(loc[0], 3), round(loc[1], 3)
+            for horizon in ("d1", "d0"):
+                fcs: dict[str, dict[int, dict[str, float]]] = defaultdict(lambda: defaultdict(dict))
+                for source, arr, t, wh in self.db.forecasts(start, end, horizon):
+                    if source not in learn.LEARNED_SOURCES:
+                        fcs[arr][t][source] = wh
+                for cfg, arr in self.arrays():
+                    if not cfg.get("sensor"):
+                        continue
+                    by_day: dict[str, list[learn.PVHour]] = defaultdict(list)
+                    for t in hours:
+                        fc = fcs[cfg["id"]].get(t)
+                        if not fc:
+                            continue
+                        act = acts[cfg["id"]].get(t)
+                        by_day[local[t].strftime("%Y-%m-%d")].append(
+                            learn.PVHour(t, local[t].hour, analysis._clear(t, arr, lat, lon),
+                                         None if act is None else max(0.0, act), dict(fc))
+                        )
+                    pred, model = learn.pv_walk_forward(days, by_day)
+                    rows += [(learn.PV_SOURCE, cfg["id"], t, horizon, round(v, 1), 0) for t, v in pred.items()]
+                    if horizon == "d1" and model is not None:
+                        info[cfg["id"]] = {
+                            "days": model.days,
+                            "weights": {k: round(v, 3) for k, v in model.weight_share().items()},
+                            "factors": {h: round(f, 3) for h, f in sorted(model.factor.items())},
+                        }
+        base = self.base_load(acts)
+        if base:
+            self.db.put_actual([(learn.BASE_SERIES, t, round(v, 1)) for t, v in base.items()])
+            by_day_load: dict[str, list[learn.LoadHour]] = defaultdict(list)
+            for t in hours:
+                d = local[t]
+                key = d.strftime("%Y-%m-%d")
+                by_day_load[key].append(learn.LoadHour(t, key, d.hour, learn.daytype(d.weekday()), base.get(t)))
+            model_out, naive = learn.load_walk_forward(days, by_day_load, self.daily_temps())
+            for horizon in ("d1", "d0"):
+                rows += [(learn.LOAD_SOURCE, learn.BASE_SERIES, t, horizon, round(v, 1), 0) for t, v in model_out.items()]
+                rows += [(learn.NAIVE_SOURCE, learn.BASE_SERIES, t, horizon, round(v, 1), 0) for t, v in naive.items()]
+        self.db.put_forecast(rows)
+        self.model_info = info
+        self._acc_cache.clear()
+        if rows:
+            self.mark("learn", True, count=len(rows))
 
     # -------------------------------------------------------------------- live
     async def _live_loop(self) -> None:
@@ -475,11 +577,16 @@ class Hub:
         end = self.midnight(now)  # complete days only
         start = end - days * 86400
         cfgs = self.settings.arrays
-        ids = [c["id"] for c in cfgs if c["kwp"] > 0 and c.get("sensor")]
+        if series == learn.BASE_SERIES:
+            ids = [learn.BASE_SERIES]
+        else:
+            ids = [c["id"] for c in cfgs if c["kwp"] > 0 and c.get("sensor")]
         ds = analysis.Dataset(self.db.forecasts(start, end, horizon), self.db.actuals(start, end), ids, self.tz)
+        if series == learn.BASE_SERIES:
+            series = analysis.TOTAL
         classes = {}
         loc = self.location
-        if loc and ids:
+        if loc and ids and ids != [learn.BASE_SERIES]:
             arrays = [to_array(c) for c in cfgs if c["id"] in ids]
             if series != analysis.TOTAL:
                 arrays = [a for a in arrays if a.id == series]
@@ -494,6 +601,7 @@ class Hub:
             "start": start,
             "end": end,
             "labels": {s: source_label(s) for s in ds.sources},
+            "model": self.model_info,
         }
         self._acc_cache[key] = (time.time(), out)
         return out
@@ -507,11 +615,12 @@ class Hub:
         hours = list(range(start, end, 3600))
         cfgs = [c for c in self.settings.arrays if c["kwp"] > 0]
         ids = [c["id"] for c in cfgs] if series == analysis.TOTAL else [series]
+        clamp = series != learn.BASE_SERIES
         act: dict[int, float] = {}
         complete: dict[int, int] = {}
         for s, t, wh in self.db.actuals(start, end):
             if s in ids:
-                act[t] = act.get(t, 0.0) + max(0.0, wh)
+                act[t] = act.get(t, 0.0) + (max(0.0, wh) if clamp else wh)
                 complete[t] = complete.get(t, 0) + 1
         actual = [round(act[t]) if complete.get(t) == len(ids) else None for t in hours]
         fcs: dict[str, dict[str, list]] = {}
@@ -541,7 +650,7 @@ class Hub:
         ids = [c["id"] for c in cfgs]
         totals: dict[str, dict[str, float]] = {}
         for source, arr, t, wh in self.db.forecasts(today, tomorrow + 90000, "d0"):
-            if arr not in ids:
+            if arr not in ids or source == learn.NAIVE_SOURCE:
                 continue
             which = "today" if t < tomorrow else "tomorrow"
             totals.setdefault(source, {"today": 0.0, "tomorrow": 0.0, "rest": 0.0})
@@ -549,6 +658,11 @@ class Hub:
             if which == "today" and t + 3600 > now:
                 totals[source]["rest"] += wh
         produced = sum(max(0.0, wh) for s, _t, wh in self.db.actuals(today, tomorrow) if s in ids)
+        load = {"today": 0.0, "tomorrow": 0.0, "measured": 0.0}
+        for source, arr, t, wh in self.db.forecasts(today, tomorrow + 90000, "d0"):
+            if source == learn.LOAD_SOURCE and arr == learn.BASE_SERIES:
+                load["today" if t < tomorrow else "tomorrow"] += wh
+        load["measured"] = sum(wh for s, _t, wh in self.db.actuals(today, tomorrow) if s == learn.BASE_SERIES)
         acc = self.accuracy(30, "d1", analysis.TOTAL, False)["results"] if ids else []
         best = analysis.best_source(acc)
         accuracy = [
@@ -574,6 +688,7 @@ class Hub:
             "ranking": [r["source"] for r in accuracy],
             "accuracy": accuracy,
             "produced_kwh": round(produced / 1000, 2),
+            "load": {k: round(v / 1000, 2) for k, v in load.items()} if any(load.values()) else None,
             "status": {k: {**v, "label": source_label(k) if not k.startswith("act:") else k[4:]} for k, v in self.status.items()},
             "backfill": self.backfill,
             "ha": self.ha.available,
@@ -627,6 +742,30 @@ class Hub:
                     "device_class": "energy",
                     "icon": "mdi:solar-power-variant",
                     "source": source_label(best),
+                    "hourly": [
+                        {"start": datetime.fromtimestamp(t, self.tz).isoformat(), "wh": round(v)}
+                        for t, v in sorted(hours.items())
+                    ],
+                },
+            )
+        load = {
+            t: wh
+            for source, arr, t, wh in self.db.forecasts(today, tomorrow + 90000, "d0")
+            if source == learn.LOAD_SOURCE and arr == learn.BASE_SERIES
+        }
+        for name, (a, b) in (("heute", (today, tomorrow)), ("morgen", (tomorrow, tomorrow + 90000))):
+            hours = {t: v for t, v in load.items() if a <= t < b}
+            if not hours:
+                continue
+            await self.ha.publish(
+                f"sensor.energypilot_verbrauch_prognose_{name}",
+                round(sum(hours.values()) / 1000, 2),
+                {
+                    "friendly_name": f"EnergyPilot Verbrauchsprognose {name}",
+                    "unit_of_measurement": "kWh",
+                    "device_class": "energy",
+                    "icon": "mdi:home-lightning-bolt-outline",
+                    "description": "Grundverbrauch ohne E-Auto und Heizstab",
                     "hourly": [
                         {"start": datetime.fromtimestamp(t, self.tz).isoformat(), "wh": round(v)}
                         for t, v in sorted(hours.items())

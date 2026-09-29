@@ -63,6 +63,28 @@ Jede Prognose wird für jede Stunde in zwei Varianten gespeichert:
 - **Vortag:** die letzte Prognose, die vor Mitternacht vorlag. Auf ihr beruht die Planung für den nächsten Tag, z. B. ob die Batterie nachts günstig aus dem Netz geladen wird.
 - **Kurzfristig:** die letzte Prognose, bevor die Stunde begann.
 
+## Eigene Prognose „EnergyPilot (lernend)“
+
+EnergyPilot baut aus allen Quellen eine eigene Prognose je Anlage:
+
+1. **Gewichtung:** Jede Quelle zählt umso mehr, je kleiner ihr Fehler bei dieser Anlage in den letzten
+   30 Tagen war – getrennt nach erwarteter Wetterlage, denn manche Modelle sind bei Sonne gut und
+   bei wechselhaftem Wetter schwach.
+2. **Korrektur nach Uhrzeit:** ein gelernter Faktor je Stunde, der erfasst, was kein Wettermodell weiß –
+   Schatten am Morgen, Abregelung am Mittag, Verschmutzung.
+
+Gelernt wird **jede Stunde neu** und rückwirkend Tag für Tag nur aus den Tagen davor. Im Prognose-Check
+tritt sie daher fair gegen die Wetterdienste an. Die Sensoren verwenden automatisch die genaueste Quelle
+der letzten 30 Tage – also die eigene Prognose, sobald sie besser ist.
+
+## Verbrauchsprognose
+
+Aus Hausverbrauch minus E-Auto minus Heizstab (Einstellungen › Sensoren) ergibt sich der
+**Grundverbrauch**. Er wird nach Uhrzeit und Wochentag (Mo–Fr, Sa, So) gelernt, jüngere Wochen zählen
+mehr; hängt der Verbrauch erkennbar von der Außentemperatur ab, wird das berücksichtigt. E-Auto und
+Heizstab sind steuerbar und werden später gezielt eingeplant. Vergleichsmaßstab im Prognose-Check
+(Auswahl „Grundverbrauch“) ist „Wie vor einer Woche“.
+
 ## Prognose-Check
 
 | Kennzahl | Bedeutung |
@@ -101,6 +123,7 @@ Mit der Option *Sensoren in Home Assistant anlegen* stellt EnergyPilot bereit:
 | `sensor.energypilot_strompreis` | aktueller Endpreis in ct/kWh; Attribut `prices` mit den nächsten 36 Stunden |
 | `sensor.energypilot_pv_prognose_heute` | PV-Prognose heute in kWh von der genauesten Quelle; Attribut `hourly` |
 | `sensor.energypilot_pv_prognose_morgen` | dasselbe für morgen |
+| `sensor.energypilot_verbrauch_prognose_heute` / `_morgen` | Grundverbrauch (ohne E-Auto und Heizstab) in kWh; Attribut `hourly` |
 | `sensor.energypilot_beste_prognosequelle` | Name der genauesten Quelle (letzte 30 Tage, Vortag) |
 
 ## Entwicklung

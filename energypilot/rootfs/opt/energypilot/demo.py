@@ -111,6 +111,7 @@ def populate(hub) -> None:
         hub.mark(key, True, count=48)
     hub.mark("ha", True, "Demo")
     hub.mark("actual", True, count=len(actual))
+    hub.learn()
 
 
 async def live_loop(hub) -> None:

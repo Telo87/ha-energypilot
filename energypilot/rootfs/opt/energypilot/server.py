@@ -11,7 +11,7 @@ from typing import Any
 
 from aiohttp import web
 
-from . import __version__, analysis
+from . import __version__, analysis, learn
 from .config import OPEN_METEO_MODELS, Options
 from .ha import HAError
 from .hub import GEOMETRY_KEYS, POWER_UNITS, Hub
@@ -50,7 +50,7 @@ def _day(value: str | None, hub: Hub) -> str:
 
 
 def _series(value: str | None, hub: Hub) -> str:
-    ids = {c["id"] for c in hub.settings.arrays}
+    ids = {c["id"] for c in hub.settings.arrays} | {learn.BASE_SERIES}
     return value if value in ids else analysis.TOTAL
 
 

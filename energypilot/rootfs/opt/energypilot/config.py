@@ -76,7 +76,8 @@ DEFAULT_SETTINGS: dict = {
         "vat": 19.0,
         "feed_in_ct": 0.0,
     },
-    "sensors": {"house": "", "grid": "", "battery_soc": "", "battery_power": ""},
+    # ev / heater: measured separately and subtracted from the house consumption
+    "sensors": {"house": "", "grid": "", "battery_soc": "", "battery_power": "", "ev": "", "heater": ""},
     "backfill_days": 90,
 }
 
