@@ -1096,6 +1096,21 @@
       efficiency: Number($('#b_eff').value) / 100, max_soc_grid: $('#b_max').value, grid_charge: $('#b_grid').checked } })));
   }
 
+  // Plausibility check: what the chosen sensors measured on average per day
+  async function consumptionCheck(box) {
+    if (!box) return;
+    let d;
+    try { d = await api('consumption-check'); } catch (e) { box.innerHTML = `<div class="card-body">${errorBox(e.message)}</div>`; return; }
+    const names = { house: ['Hausverbrauch', 'home'], ev: ['E-Auto / Wallbox', 'plug'], heater: ['Heizstab', 'zap'], base: ['Grundverbrauch', 'home'] };
+    const rows = Object.entries(d.series).map(([k, v]) => `<div class="list-item"><div class="avatar ${k === 'base' ? 'accent' : ''}">${ic(names[k][1])}</div>
+        <div class="grow"><div class="title">${names[k][0]}${k === 'base' ? ' <span class="faint" style="font-weight:400">= Haus − E-Auto − Heizstab</span>' : ''}</div>
+          <div class="meta">${v.hours} von ${d.days * 24} Stunden mit Messwert${v.negative ? ' · <span class="pos">negative Werte – das Vorzeichen wird automatisch umgedreht</span>' : ''}${k !== 'base' && v.hours < d.days * 24 * 0.9 ? ' · <span class="pos">Lücken: diese Stunden fehlen im Grundverbrauch</span>' : ''}</div></div>
+        <b class="num">${nf(Math.abs(v.kwh_per_day), 1)} kWh/Tag</b></div>`).join('');
+    box.innerHTML = `<div class="card-head"><h2>Kontrolle <span class="sub">Durchschnitt pro Tag, letzte ${d.days} Tage</span></h2></div>
+      <div class="card-body flush"><div class="list">${rows || '<div class="muted" style="padding:6px 18px 14px;font-size:13px">Noch keine Messwerte – bitte zuerst den Hausverbrauch auswählen und speichern.</div>'}</div>
+      ${d.forecast_kwh_per_day != null ? `<div class="muted" style="padding:10px 18px 12px;font-size:12.5px;border-top:1px solid var(--border)">Verbrauchsprognose (Vortag) im selben Zeitraum: <b>${nf(d.forecast_kwh_per_day, 1)} kWh/Tag</b>. Passt der Grundverbrauch nicht zu deinem Gefühl, prüfe den Hausverbrauch-Sensor: Er soll den gesamten Verbrauch des Hauses messen – nicht den Netzbezug und nicht den Zählerstand des Smartmeters.</div>` : ''}</div>`;
+  }
+
   async function renderSensors(el) {
     setHeader('Einstellungen', 'Sensoren für Live-Werte und spätere Optimierung');
     let ents = [];
@@ -1116,8 +1131,10 @@
         <div class="field"><label>Längengrad</label><input class="input" id="n_lon" type="number" step="0.0001" value="${loc.longitude ?? ''}" placeholder="${ha ? ha[1] : ''}"></div></div>
         <span class="hint faint" style="font-size:12px">Eine Änderung verwirft die gespeicherten Wetterdaten und lädt sie für den neuen Ort neu.</span>
       </div></div></div>
-      <div class="row" style="margin-top:16px"><button class="btn primary" id="n_save">${ic('check')}Speichern</button></div>`;
+      <div class="row" style="margin-top:16px"><button class="btn primary" id="n_save">${ic('check')}Speichern</button></div>
+      <div class="card" style="margin-top:16px" id="consCheck"></div>`;
     bindPickers(el, ents);
+    consumptionCheck($('#consCheck'));
     $('#n_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({
       sensors: { house: $('#n_house').value, grid: $('#n_grid').value, battery_soc: $('#n_soc').value, battery_power: $('#n_bp').value, ev: $('#n_ev').value, heater: $('#n_heater').value },
       location: { latitude: $('#n_lat').value, longitude: $('#n_lon').value },

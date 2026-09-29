@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Neu: **Kontrolle** unter Einstellungen › Sensoren – Durchschnitt pro Tag der letzten 7 Tage für Hausverbrauch, E-Auto, Heizstab und den daraus berechneten Grundverbrauch, mit Hinweis auf Lücken; zum Prüfen, ob die Sensoren richtig gewählt sind
+- Behoben: Der gespeicherte Grundverbrauch wird bei jedem Lernen komplett neu berechnet – Werte aus der Zeit, bevor E-Auto und Heizstab eingetragen waren, bleiben nicht mehr stehen (betraf Anzeige und Prognose-Check)
+- Sensoren, die den Verbrauch mit negativem Vorzeichen melden, werden erkannt und umgedreht
+
 ## 0.3.0
 
 - Neu: **Planung** – günstigster Fahrplan für den Heimspeicher bis zum Ende der bekannten Strompreise (meist morgen 24 Uhr). Pro Stunde: Eigenverbrauch, Akku halten (Energie für teure Stunden aufsparen) oder aus dem Netz laden. Grundlage: genaueste PV-Prognose, Verbrauchsprognose, aktueller Ladezustand und Strompreise; Energie, die am Ende im Akku bleibt, wird mit einem vorsichtigen Preis bewertet

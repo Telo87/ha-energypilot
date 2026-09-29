@@ -157,6 +157,10 @@ class Database:
             (start, end),
         )
 
+    def delete_actual_range(self, series: str, start: int, end: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM actual WHERE series=? AND target>=? AND target<?", (series, start, end))
+
     def delete_actual(self, series: str) -> None:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM actual WHERE series=?", (series,))

@@ -441,15 +441,41 @@ class Hub:
             self.mark("learn", False, f"Lernen fehlgeschlagen: {err}")
 
     def base_load(self, acts: dict[str, dict[int, float]]) -> dict[int, float]:
-        """Household consumption without EV and heating rod (Wh per hour)."""
+        """Household consumption without EV and heating rod (Wh per hour).
+
+        Hours where the EV or heating-rod value is missing are left out – guessing
+        0 there would count a charging car as base load. Sensors that report
+        consumption as negative values (some inverters do) are flipped."""
         sensors = self.settings.data["sensors"]
         extra = [k for k in ("ev", "heater") if sensors.get(k)]
+        sign = {k: -1.0 if sum(acts.get(k, {}).values()) < 0 else 1.0 for k in ("house", *extra)}
         out = {}
         for t, house in acts.get("house", {}).items():
             parts = [acts.get(k, {}).get(t) for k in extra]
             if any(v is None for v in parts):
                 continue
-            out[t] = max(0.0, house - sum(max(0.0, v) for v in parts))
+            parts = [max(0.0, v * sign[k]) for k, v in zip(extra, parts, strict=True)]
+            out[t] = max(0.0, house * sign["house"] - sum(parts))
+        return out
+
+    def consumption_check(self, days: int = 7) -> dict:
+        """Average kWh per day of the consumption series – to verify the sensor choice."""
+        end = self.midnight(int(time.time()))
+        start = end - days * 86400
+        sensors = self.settings.data["sensors"]
+        out: dict = {"days": days, "series": {}}
+        for key in ("house", "ev", "heater", learn.BASE_SERIES):
+            if key != learn.BASE_SERIES and not sensors.get(key):
+                continue
+            rows = self.db.actuals(start, end, key)
+            total = sum(wh for _s, _t, wh in rows)
+            out["series"][key] = {
+                "kwh_per_day": round(total / 1000 / days, 2),
+                "hours": len(rows),
+                "negative": total < 0,
+            }
+        fc = [wh for s, a, t, wh in self.db.forecasts(start, end, "d1") if s == learn.LOAD_SOURCE and a == learn.BASE_SERIES]
+        out["forecast_kwh_per_day"] = round(sum(fc) / 1000 / days, 2) if fc else None
         return out
 
     def daily_temps(self) -> dict[str, float]:
@@ -509,6 +535,8 @@ class Hub:
                             "factors": {h: round(f, 3) for h, f in sorted(model.factor.items())},
                         }
         base = self.base_load(acts)
+        # rebuild the stored base load completely: rows from an earlier sensor setup must not stay behind
+        self.db.delete_actual_range(learn.BASE_SERIES, start, end)
         if base:
             self.db.put_actual([(learn.BASE_SERIES, t, round(v, 1)) for t, v in base.items()])
             by_day_load: dict[str, list[learn.LoadHour]] = defaultdict(list)

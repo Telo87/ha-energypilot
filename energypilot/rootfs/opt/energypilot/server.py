@@ -124,6 +124,11 @@ async def price_view(request: web.Request) -> web.Response:
     return _ok({"slots": hub.price_slots(start, end), "tariff": hub.settings.data["tariff"], "now": int(time.time())})
 
 
+@routes.get("/api/consumption-check")
+async def consumption_check(request: web.Request) -> web.Response:
+    return _ok(await asyncio.to_thread(_hub(request).consumption_check))
+
+
 @routes.get("/api/plan")
 async def plan(request: web.Request) -> web.Response:
     hub = _hub(request)

@@ -59,3 +59,17 @@ def test_battery_runtime(tmp_path):
     sunny = [{"t": 3600 * h, "frac": 1.0, "pv": 3.0, "load": 0.5} for h in range(6)]
     rt = hub.battery_runtime(5.5, sunny, 500, now=0)
     assert rt["empty_at"] is None and rt["full_at"] is not None
+
+
+def test_base_load_subtracts_ev_and_heater(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"sensors": {"house": "sensor.haus", "ev": "sensor.auto", "heater": "sensor.heizstab"}})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    acts = {
+        "house": {0: 3000.0, 3600: 800.0, 7200: 500.0},
+        "ev": {0: 2200.0, 3600: 0.0},  # hour 7200 missing
+        "heater": {0: 0.0, 3600: 300.0, 7200: 0.0},
+    }
+    assert hub.base_load(acts) == {0: 800.0, 3600: 500.0}  # hour without EV value is left out
+    negative = {k: {t: -v for t, v in d.items()} if k == "house" else d for k, d in acts.items()}
+    assert hub.base_load(negative) == {0: 800.0, 3600: 500.0}  # inverter reports consumption negative
