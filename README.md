@@ -1,0 +1,34 @@
+# EnergyPilot – Home Assistant Add-on
+
+![Version](https://img.shields.io/badge/version-0.1.0-blue)
+
+Welche PV-Prognose stimmt bei **deinem** Dach? EnergyPilot sammelt stündlich die Prognosen mehrerer
+Wetterdienste, vergleicht sie mit der tatsächlichen Erzeugung jeder Anlage und zeigt dynamische
+Strompreise. Auf dieser Grundlage folgen eine eigene, lernende Prognose und die Steuerung von
+Batterie, E-Auto und Heizstab.
+
+## Funktionen (0.1)
+
+- **Mehrere PV-Anlagen** mit eigener Ausrichtung und eigenem Messsensor (z. B. zwei Wechselrichter)
+- **Prognosequellen:** DWD ICON-D2 und ICON-EU, ECMWF, NOAA GFS, Météo-France und weitere über Open-Meteo (kostenlos), Forecast.Solar, optional Solcast
+- **Sofortiger Rückblick:** Messwerte aus der Langzeitstatistik von Home Assistant und archivierte Modellprognosen der letzten 90 Tage, die Rangliste steht nach wenigen Minuten
+- **Prognose-Check:** Genauigkeit je Quelle, für Vortag und kurzfristig, nach Wetterlage und je Anlage
+- **Strompreise:** EPEX Day-Ahead in Viertelstunden mit den Aufschlägen deines Tarifs (z. B. sonnen EnergyDynamic), günstigste Zeitfenster
+- **Sensoren** für Automationen: Strompreis, PV-Prognose heute und morgen, genaueste Quelle
+
+## Geplant
+
+- Eigene Prognose, die aus allen Quellen und deinen Messwerten lernt (Bias-Korrektur je Anlage und Wetterlage)
+- Verbrauchsprognose aus dem Hausverbrauch
+- Planer: Batterie aus dem Netz laden, ja oder nein (sonnenBatterie), E-Auto-Ladeplan über evcc, Heizstab bei Überschuss
+- Live-Entscheidung „Strom kaufen oder nicht“
+
+## Installation
+
+1. In Home Assistant: **Einstellungen › Add-ons › Add-on Store › ⋮ › Repositories**
+2. `https://github.com/Telo87/ha-energypilot` hinzufügen
+3. **EnergyPilot** installieren und starten, dann die Web-UI öffnen
+
+## Lizenz
+
+MIT

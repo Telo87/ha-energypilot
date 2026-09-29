@@ -1,0 +1,7 @@
+configuration:
+  publish_sensors:
+    name: Sensoren in Home Assistant anlegen
+    description: Strompreis, PV-Prognose heute/morgen und die genaueste Prognosequelle als Entitäten bereitstellen.
+  log_level:
+    name: Protokollierungsstufe
+    description: Detailgrad der Add-on-Protokolle.

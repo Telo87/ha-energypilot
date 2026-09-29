@@ -1,0 +1,7 @@
+configuration:
+  publish_sensors:
+    name: Create sensors in Home Assistant
+    description: Provide electricity price, PV forecast today/tomorrow and the most accurate forecast source as entities.
+  log_level:
+    name: Log level
+    description: Level of detail of the add-on logs.

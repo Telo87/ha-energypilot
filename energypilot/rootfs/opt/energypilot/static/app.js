@@ -1,0 +1,1010 @@
+/* EnergyPilot – single page app (no build step, no external dependencies) */
+(() => {
+  'use strict';
+
+  // ------------------------------------------------------------------ utils
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const nf = (v, d = 0) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+  // Re-render without jumping: automatic refreshes replace the page content,
+  // which can briefly shorten the document and reset the scroll position.
+  function keepScroll(fn) {
+    const el = document.scrollingElement || document.documentElement;
+    const top = el.scrollTop;
+    fn();
+    if (el.scrollTop !== top) el.scrollTop = top;
+  }
+  const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // DOM morphing: periodic refreshes only touch what actually changed, so hover
+  // states, focus, tooltips and running animations survive. Children are matched
+  // by data-key / id, otherwise by position. Elements marked data-keep are left
+  // alone (their content is managed elsewhere, e.g. the chart). An element whose
+  // data-flash value changes lights up briefly (device goes online …).
+  const keyOf = (n) => (n.nodeType === 1 ? n.getAttribute('data-key') || n.id || null : null);
+  function flash(el) {
+    el.classList.remove('flash');
+    void el.offsetWidth; // restart the animation
+    el.classList.add('flash');
+    clearTimeout(el._flashT);
+    el._flashT = setTimeout(() => el.classList.remove('flash'), 1600);
+  }
+  function morphNode(a, b) {
+    if (a.nodeType !== 1) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+    if (a.hasAttribute('data-keep') && b.hasAttribute('data-keep')) return;
+    const changed = a.hasAttribute('data-flash') && b.hasAttribute('data-flash') && a.getAttribute('data-flash') !== b.getAttribute('data-flash');
+    // while the page fades in, keep the stagger delay (style="--i") – removing it
+    // would restart the running animation and make the element jump
+    const keepI = a.style && a.closest('.page-in') ? a.style.getPropertyValue('--i') : '';
+    Array.from(a.attributes).forEach((at) => { if (!b.hasAttribute(at.name) && !(at.name === 'style' && keepI)) a.removeAttribute(at.name); });
+    Array.from(b.attributes).forEach((at) => { if (a.getAttribute(at.name) !== at.value && !(at.name === 'style' && keepI)) a.setAttribute(at.name, at.value); });
+    if (keepI && b.hasAttribute('style')) { a.setAttribute('style', b.getAttribute('style')); a.style.setProperty('--i', keepI); }
+    if (a.tagName === 'INPUT') {
+      if (a.type === 'checkbox' || a.type === 'radio') a.checked = b.hasAttribute('checked');
+      else if (a !== document.activeElement && a.value !== (b.getAttribute('value') || '')) a.value = b.getAttribute('value') || '';
+    }
+    if (a.tagName !== 'TEXTAREA') morphChildren(a, b);
+    if (changed) flash(a);
+  }
+  function morphChildren(cur, next) {
+    const keyed = new Map();
+    Array.from(cur.childNodes).forEach((n) => { const k = keyOf(n); if (k) keyed.set(k, n); });
+    const list = Array.from(next.childNodes);
+    list.forEach((nb, i) => {
+      const k = keyOf(nb);
+      let na = k ? keyed.get(k) : cur.childNodes[i];
+      if (na && k) keyed.delete(k);
+      if (na && (na.nodeType !== nb.nodeType || na.nodeName !== nb.nodeName || (!k && keyOf(na)))) na = null;
+      if (!na) { cur.insertBefore(nb, cur.childNodes[i] || null); return; }
+      if (na !== cur.childNodes[i]) cur.insertBefore(na, cur.childNodes[i] || null);
+      morphNode(na, nb);
+    });
+    while (cur.childNodes.length > list.length) cur.lastChild.remove();
+  }
+  function morph(target, html) {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    morphChildren(target, tpl.content);
+    animateCounts(target);
+  }
+  // first draw after the loading skeleton: replace (so the page fades in), later: morph
+  function render(el, html) {
+    if (!el.firstElementChild || el.querySelector(':scope > .card > .card-body > .skeleton')) { el.innerHTML = html; animateCounts(el); } else morph(el, html);
+  }
+  // one listener per element and event; redraws only swap the handler
+  function on(el, type, fn) {
+    if (!el) return;
+    el._on = el._on || {};
+    if (!el._on[type]) el.addEventListener(type, (e) => el._on[type](e));
+    el._on[type] = fn;
+  }
+
+  // Numbers count up/down to their new value: <span data-count=key …>
+  const counts = new Map();
+  function cnt(key, text, unit = '') {
+    const s = String(text);
+    if (!/^-?[\d.]+(,\d+)?$/.test(s)) return esc(s);
+    const dec = (s.split(',')[1] || '').length;
+    const val = Number(s.replace(/\./g, '').replace(',', '.'));
+    return `<span data-count="${esc(key)}" data-val="${val}" data-dec="${dec}" data-unit="${esc(unit)}">${s}</span>`;
+  }
+  function animateCounts(root) {
+    root.querySelectorAll('[data-count]').forEach((el) => {
+      const key = el.dataset.count; const to = Number(el.dataset.val); const dec = Number(el.dataset.dec); const unit = el.dataset.unit;
+      const prev = counts.get(key);
+      counts.set(key, { v: to, unit });
+      const from = prev ? (prev.unit === unit ? prev.v : to) : 0;
+      if (el._anim) cancelAnimationFrame(el._anim);
+      if (from === to || reducedMotion()) return;
+      const fmt = (v) => nf(v, dec);
+      const t0 = performance.now(); const dur = prev ? 600 : 800;
+      const step = (t) => {
+        const p = Math.min(1, (t - t0) / dur); const e = 1 - (1 - p) ** 3;
+        el.textContent = fmt(from + (to - from) * e);
+        el._anim = p < 1 ? requestAnimationFrame(step) : null;
+      };
+      el.textContent = fmt(from);
+      el._anim = requestAnimationFrame(step);
+    });
+  }
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('energypilot.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem('energypilot.' + k, JSON.stringify(v)); } catch { /* ignore */ } },
+  };
+
+
+  const P = {
+    grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
+    chart: '<path d="M3 3v18h18"/><path d="m7 15 4-5 4 3 5-7"/>',
+    euro: '<path d="M18 7.5A6.5 6.5 0 1 0 18 16.5"/><path d="M4 10.5h9M4 13.5h9"/>',
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    solar: '<path d="M4 20 6 10h12l2 10z"/><path d="M5 15h14M9.3 10 8.5 20M14.7 10l.8 10"/><path d="M12 2v3M5.6 4.6l1.5 1.5M18.4 4.6l-1.5 1.5"/>',
+    moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+    contrast: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>',
+    cloud: '<path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 13 3 3 0 0 0 6 19z"/>',
+    cloudSun: '<path d="M12 2v2M4.9 4.9l1.4 1.4M2 12h2M19.1 4.9l-1.4 1.4"/><path d="M15.9 9.7A4 4 0 0 0 8.2 10"/><path d="M17.5 21a3.5 3.5 0 1 0-1.1-6.8A4.5 4.5 0 0 0 8 16a2.5 2.5 0 0 0 .5 5z"/>',
+    home: '<path d="m3 11 9-8 9 8"/><path d="M5 9.5V20h14V9.5"/>',
+    battery: '<rect x="2" y="7" width="17" height="10" rx="2"/><path d="M22 11v2"/><path d="M6 10v4M10 10v4"/>',
+    plug: '<path d="M9 2v6M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v4"/>',
+    zap: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+    menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
+    message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    x: '<path d="M18 6 6 18M6 6l12 12"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    trash: '<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
+    edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+    check: '<path d="M20 6 9 17l-5-5"/>',
+    checkCircle: '<circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.5 2.5L16 9.5"/>',
+    alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+    refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    chevron: '<path d="m9 6 6 6-6 6"/>',
+    chevronL: '<path d="m15 6-6 6 6 6"/>',
+    trophy: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
+    database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+    sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+    palette: '<path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11.5" r="1"/><circle cx="10.5" cy="7.5" r="1"/><circle cx="15" cy="7.5" r="1"/>',
+    compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
+  };
+  const ic = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[name] || ''}</svg>`;
+
+  // -------------------------------------------------------------------- api
+  async function api(path, opts = {}) {
+    const init = { method: opts.method || 'GET', headers: {} };
+    if (opts.body !== undefined) {
+      init.headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(opts.body);
+    }
+    let res;
+    try { res = await fetch('api/' + path, init); } catch (e) { throw new Error('Keine Verbindung zum Add-on.'); }
+    let data = null;
+    try { data = await res.json(); } catch { /* not json */ }
+    if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+    return data.data;
+  }
+
+  // ------------------------------------------------------------- formatting
+  const fmtTime = (d) => d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  const fmtHour = (ts) => fmtTime(new Date(ts * 1000));
+  const fmtDay = (ts) => new Date(ts * 1000).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  const fmtDate = (ts) => new Date(ts * 1000).toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  function fmtAgo(ts) {
+    if (!ts) return 'nie';
+    const s = Math.max(0, Date.now() / 1000 - ts);
+    if (s < 60) return 'gerade eben';
+    if (s < 3600) return `vor ${Math.round(s / 60)} min`;
+    if (s < 86400) return `vor ${Math.round(s / 3600)} h`;
+    return `vor ${Math.round(s / 86400)} Tagen`;
+  }
+  function fmtW(w) {
+    if (w == null) return '–';
+    const a = Math.abs(w);
+    return a >= 1000 ? `${nf(w / 1000, a >= 10000 ? 1 : 2)} kW` : `${nf(w)} W`;
+  }
+  const kwh = (v, d = 1) => (v == null ? '–' : `${nf(v, d)} kWh`);
+  const pct = (v, d = 1) => (v == null ? '–' : `${nf(v, d)} %`);
+  const signed = (v, d = 1) => (v == null ? '–' : `${v > 0 ? '+' : v < 0 ? '−' : '±'}${nf(Math.abs(v), d)}`);
+  const ctkwh = (v, d = 1) => (v == null ? '–' : `${nf(v, d)} ct/kWh`);
+  const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const dayTs = (day) => new Date(`${day}T00:00:00`).getTime() / 1000;
+  const shiftDay = (day, n) => { const d = new Date(`${day}T12:00:00`); d.setDate(d.getDate() + n); return localDay(d); };
+
+  // Source colours: fixed per source (identity follows the entity, never its rank)
+  const SRC_SLOT = { 'om:best_match': 1, 'om:icon_d2': 2, 'om:ecmwf_ifs025': 3, fs: 4, 'om:icon_eu': 5, 'om:gfs_seamless': 6, 'om:meteofrance_seamless': 7, sc: 8 };
+  const srcColor = (s) => (SRC_SLOT[s] ? `var(--s${SRC_SLOT[s]})` : 'var(--s-other)');
+  const CLASS_LABEL = { sunny: ['Sonnig', 'sun'], mixed: ['Wechselhaft', 'cloudSun'], cloudy: ['Trüb', 'cloud'] };
+  const HORIZONS = [['d1', 'Vortag', 'Prognose vom Vortag (vor Mitternacht) – die Grundlage für die Planung des nächsten Tages'], ['d0', 'Kurzfristig', 'Letzte Prognose vor der jeweiligen Stunde']];
+
+  // ------------------------------------------------------------------ chart
+  function niceMax(v) {
+    if (!v || v <= 0) return 1;
+    const e = 10 ** Math.floor(Math.log10(v)); const f = v / e;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * e;
+  }
+  // bar with rounded data end (top for positive, bottom for negative values)
+  function barPath(x, y0, y1, w, r) {
+    const h = Math.abs(y1 - y0); r = Math.min(r, w / 2, h);
+    if (h < 0.5) return '';
+    if (y1 < y0) return `M${x},${y0}V${y1 + r}Q${x},${y1} ${x + r},${y1}H${x + w - r}Q${x + w},${y1} ${x + w},${y1 + r}V${y0}Z`;
+    return `M${x},${y0}V${y1 - r}Q${x},${y1} ${x + r},${y1}H${x + w - r}Q${x + w},${y1} ${x + w},${y1 - r}V${y0}Z`;
+  }
+  /* Time chart: one optional bar series (measured values or prices) plus lines.
+     c = { xs, step, bar: {label, values, cls, clsFor(i)}, lines: [{key,label,color,values}],
+           fmt, axisFmt, head(ts), tick(ts), height, now, onClick(i) } */
+  function timeChart(el, c) {
+    if (!el) return;
+    const n = c.xs.length;
+    const vals = [...(c.bar ? c.bar.values : []), ...c.lines.flatMap((l) => l.values)].filter((v) => v != null);
+    if (!n || !vals.length) { el.innerHTML = `<div class="empty" style="padding:70px 0">${c.emptyText || 'Noch keine Daten.'}</div>`; return; }
+    const W = Math.max(320, el.clientWidth); const H = c.height || 240;
+    const pad = { l: 56, r: 10, t: 14, b: 26 };
+    // axis: a "nice" step (1/2/2.5/5·10ⁿ) for about four gridlines, ends just above the data
+    const hi = Math.max(0, ...vals); const lo = Math.min(0, ...vals);
+    const stepV = niceMax(Math.max(hi - lo, 1e-9) / 4);
+    const max = Math.max(stepV, Math.ceil((hi * 1.02) / stepV) * stepV);
+    const min = lo < 0 ? Math.floor((lo * 1.02) / stepV) * stepV : 0;
+    const cw = (W - pad.l - pad.r) / n;
+    const x = (i) => pad.l + i * cw;
+    const y = (v) => pad.t + ((max - v) / (max - min)) * (H - pad.t - pad.b);
+    let grid = '';
+    for (let k = Math.round(min / stepV); k * stepV <= max + stepV * 1e-6; k += 1) {
+      const v = k * stepV; const yy = y(v).toFixed(1);
+      grid += `<line class="${k === 0 ? 'zero' : 'grid-line'}" x1="${pad.l}" x2="${W - pad.r}" y1="${yy}" y2="${yy}"/><text class="axis" x="${pad.l - 8}" y="${Number(yy) + 4}" text-anchor="end">${(c.axisFmt || c.fmt)(v)}</text>`;
+    }
+    const every = Math.max(1, Math.ceil(64 / cw));
+    const tick = c.tick || ((ts) => fmtHour(ts));
+    for (let i = 0; i < n; i += 1) {
+      if (c.tickAt ? !c.tickAt(c.xs[i], i) : i % every) continue;
+      grid += `<text class="axis" x="${x(i) + (c.tickCenter ? cw / 2 : 0)}" y="${H - 7}" text-anchor="${i === 0 && !c.tickCenter ? 'start' : 'middle'}">${tick(c.xs[i])}</text>`;
+    }
+    let bars = '';
+    if (c.bar) {
+      const gap = cw > 8 ? 2 : cw > 3 ? 1 : 0;
+      c.bar.values.forEach((v, i) => {
+        if (v == null) return;
+        const cls = `${c.bar.cls}${c.bar.clsFor ? ` ${c.bar.clsFor(i, v)}` : ''}`;
+        bars += `<path class="${cls}" d="${barPath(x(i) + gap / 2, y(0), y(v), cw - gap, cw > 8 ? 4 : 1.5)}"/>`;
+      });
+    }
+    let lines = '';
+    c.lines.forEach((l) => {
+      let d = ''; let pen = false;
+      l.values.forEach((v, i) => {
+        if (v == null) { pen = false; return; }
+        d += `${pen ? 'L' : 'M'}${(x(i) + cw / 2).toFixed(1)},${y(v).toFixed(1)}`; pen = true;
+      });
+      if (d) lines += `<path class="ln" pathLength="1" d="${d}" fill="none" stroke="${l.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"${l.dash ? ' stroke-dasharray="5 4"' : ''}/>`;
+    });
+    let nowMark = '';
+    if (c.now && c.now >= c.xs[0] && c.now < c.xs[n - 1] + c.step) {
+      const nx = (pad.l + ((c.now - c.xs[0]) / c.step) * cw).toFixed(1);
+      nowMark = `<line class="now-line" x1="${nx}" x2="${nx}" y1="${pad.t - 4}" y2="${H - pad.b}"/><text class="now-label" x="${nx}" y="${pad.t - 5}" text-anchor="middle">jetzt</text>`;
+    }
+    const drawIn = !el.querySelector('svg');
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px" class="${drawIn && !c.noAnim ? 'draw-in' : ''}">
+      <g class="gl">${grid}</g><rect class="hover-col" x="0" y="${pad.t}" width="${cw}" height="${H - pad.t - pad.b}" style="display:none"/>
+      <g>${bars}</g><g class="series">${lines}</g>${nowMark}
+      <rect x="${pad.l}" y="0" width="${W - pad.l - pad.r}" height="${H}" class="hit-col" style="${c.onClick ? '' : 'cursor:default'}"/>
+    </svg><div class="tip" style="display:none"></div>`;
+    el.style.minHeight = `${H}px`;
+    const svg = el.querySelector('svg'); const tip = el.querySelector('.tip'); const col = svg.querySelector('.hover-col');
+    const idx = (ev) => {
+      const r = svg.getBoundingClientRect();
+      return Math.max(0, Math.min(n - 1, Math.floor((((ev.clientX - r.left) / r.width) * W - pad.l) / cw)));
+    };
+    const hit = svg.querySelector('.hit-col');
+    hit.addEventListener('mousemove', (ev) => {
+      const i = idx(ev); const r = svg.getBoundingClientRect();
+      col.style.display = ''; col.setAttribute('x', x(i));
+      const rows = [];
+      if (c.bar && c.bar.values[i] != null) rows.push(`<div class="row-t"><span><i class="box" style="background:${c.bar.color}"></i>${esc(c.bar.label)}</span><span>${c.fmt(c.bar.values[i])}</span></div>`);
+      c.lines.forEach((l) => { if (l.values[i] != null) rows.push(`<div class="row-t"><span><i style="background:${l.color}"></i>${esc(l.label)}</span><span>${c.fmt(l.values[i])}</span></div>`); });
+      if (!rows.length) { tip.style.display = 'none'; return; }
+      tip.innerHTML = `<b>${(c.head || fmtHour)(c.xs[i])}</b>${rows.join('')}`;
+      tip.style.display = '';
+      const cx = ((x(i) + cw / 2) / W) * r.width;
+      const tw = tip.offsetWidth;
+      tip.style.left = `${Math.max(tw / 2, Math.min(r.width - tw / 2, cx))}px`;
+      tip.style.top = `${(pad.t / H) * r.height + 8}px`;
+      tip.style.transform = 'translate(-50%, 0)';
+    });
+    hit.addEventListener('mouseleave', () => { col.style.display = 'none'; tip.style.display = 'none'; });
+    if (c.onClick) hit.addEventListener('click', (ev) => c.onClick(idx(ev)));
+  }
+  // redraw charts when the width changes
+  const charts = new Map();
+  function chart(el, cfg) { if (!el) return; charts.set(el.id, cfg); timeChart(el, cfg); }
+  let resizeT = 0;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(() => charts.forEach((cfg, id) => { const el = document.getElementById(id); if (el) timeChart(el, { ...cfg, noAnim: true }); else charts.delete(id); }), 150);
+  });
+
+  // legend chips toggle lines; hidden sources are remembered per browser
+  function legendHTML(bar, lines, hidden) {
+    return `<div class="legend">${bar ? `<span class="static"><i class="box" style="background:${bar.color}"></i>${esc(bar.label)}</span>` : ''}${lines.map((l) => `<button data-series="${esc(l.key)}" class="${hidden.has(l.key) ? 'off' : ''}" aria-pressed="${!hidden.has(l.key)}"><i style="background:${l.color}"></i>${esc(l.label)}</button>`).join('')}</div>`;
+  }
+  function hiddenSet(ranking, all) {
+    const stored = store.get('hidden', null);
+    if (stored) return new Set(stored.filter((s) => all.includes(s)));
+    // first visit: show the three most accurate sources
+    const top = (ranking && ranking.length ? ranking : all).slice(0, 3);
+    return new Set(all.filter((s) => !top.includes(s)));
+  }
+  function toggleHidden(key) {
+    const cur = new Set(store.get('hidden', null) || []);
+    if (!store.get('hidden', null)) $$('.legend button.off').forEach((b) => cur.add(b.dataset.series));
+    if (cur.has(key)) cur.delete(key); else cur.add(key);
+    store.set('hidden', [...cur]);
+  }
+
+  // ------------------------------------------------------------------ state
+  const S = { cleanup: [], overview: null, settings: null, entities: null, pageAnim: false };
+  const MEASURED = { label: 'Gemessen', color: 'var(--measured)' };
+
+  // ------------------------------------------------------------------ pages
+  const PAGES = [
+    { id: 'dashboard', title: 'Übersicht', icon: 'grid', section: 'Energie' },
+    { id: 'accuracy', title: 'Prognose-Check', icon: 'target' },
+    { id: 'day', title: 'Tagesverlauf', icon: 'chart' },
+    { id: 'prices', title: 'Strompreise', icon: 'euro' },
+    { id: 'settings', title: 'Einstellungen', icon: 'gear', section: 'Verwaltung' },
+  ];
+  function renderNav() {
+    const cur = currentPage();
+    $('#nav').innerHTML = PAGES.map((p) => `${p.section ? `<div class="nav-section">${p.section}</div>` : ''}
+      <a href="#/${p.id}" class="${p.id === cur ? 'active' : ''}">${ic(p.icon)}<span>${p.title}</span></a>`).join('');
+  }
+  function currentPage() {
+    const id = (location.hash.replace(/^#\/?/, '').split('?')[0]) || 'dashboard';
+    return PAGES.some((p) => p.id === id) ? id : 'dashboard';
+  }
+  const query = () => new URLSearchParams(location.hash.split('?')[1] || '');
+  function setHeader(title, sub = '', actions = '') {
+    $('#pageTitle').textContent = title;
+    $('#pageSub').innerHTML = sub;
+    $('#pageActions').innerHTML = actions;
+  }
+  const STAGGER = ':scope > .grid > .card, .list > .list-item, tbody > tr';
+  let pageAnimT = 0;
+  function pageIn(content) {
+    const skel = content.children.length === 1 && content.querySelector(':scope > .card > .card-body > .skeleton');
+    content.classList.remove('page-in');
+    void content.offsetWidth;
+    $$(STAGGER, content).slice(0, 20).forEach((nd, i) => nd.style.setProperty('--i', i));
+    content.classList.add('page-in');
+    clearTimeout(pageAnimT);
+    pageAnimT = setTimeout(() => content.classList.remove('page-in'), 1500);
+    return !skel;
+  }
+  function watchPageIn() {
+    const content = $('#content');
+    new MutationObserver(() => {
+      if (!S.pageAnim || !content.firstElementChild) return;
+      if (pageIn(content)) S.pageAnim = false;
+    }).observe(content, { childList: true });
+  }
+
+  let renderToken = 0;
+  const stale = (token) => token !== renderToken;
+  async function navigate() {
+    S.cleanup.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
+    S.cleanup = [];
+    charts.clear();
+    renderToken += 1;
+    const page = currentPage();
+    renderNav();
+    $('#app').classList.remove('nav-open');
+    const content = $('#content');
+    S.pageAnim = true;
+    counts.clear();
+    content.innerHTML = loading();
+    window.scrollTo(0, 0);
+    setHeader(PAGES.find((p) => p.id === page).title);
+    try { await RENDER[page](content, renderToken); } catch (e) { content.innerHTML = errorBox(e.message); }
+  }
+  async function loadSettings() { S.settings = await api('settings'); return S.settings; }
+  async function loadEntities(force = false) {
+    if (!S.entities || force) S.entities = await api('entities');
+    return S.entities;
+  }
+
+  const refreshBtn = () => `<button class="btn" id="refreshBtn" title="Prognosen, Preise und Messwerte jetzt abrufen">${ic('refresh')}<span class="hide-sm">Jetzt abrufen</span></button>`;
+  function bindRefresh(after) {
+    const b = $('#refreshBtn');
+    if (b) b.addEventListener('click', () => withBusy(b, async () => {
+      try { await api('refresh', { method: 'POST' }); toast('Abruf gestartet – die Daten sind in wenigen Sekunden da.', 'info'); setTimeout(after, 6000); } catch (e) { toast(e.message, 'err'); }
+    }));
+  }
+
+  // ---------------------------------------------------------------- welcome
+  function welcome(el) {
+    el.innerHTML = `<div class="card"><div class="card-body">${empty('solar', 'Willkommen bei EnergyPilot',
+      'Lege zuerst deine PV-Anlagen an – mit Leistung, Neigung, Ausrichtung und dem Leistungs- oder Energiesensor des Wechselrichters. Danach sammelt EnergyPilot stündlich Prognosen mehrerer Wetterdienste, liest die tatsächliche Erzeugung rückwirkend aus Home Assistant und zeigt, welche Prognose bei dir am genauesten ist.',
+      `<a class="btn primary" href="#/settings?tab=arrays&add=1">${ic('plus')}PV-Anlage anlegen</a>`)}</div></div>`;
+  }
+
+  // -------------------------------------------------------------- dashboard
+  async function renderDashboard(el, token) {
+    let day = null; let tomorrow = null; let lastDayLoad = 0; let drawn = false;
+    const load = async () => {
+      const ov = await api('overview');
+      if (stale(token)) return;
+      S.overview = ov;
+      if (!ov.arrays.length) { setHeader('Übersicht'); welcome(el); return; }
+      if (Date.now() - lastDayLoad > 5 * 60000) {
+        const today = localDay();
+        [day, tomorrow] = await Promise.all([api(`day?day=${today}`), api(`day?day=${shiftDay(today, 1)}`)]);
+        lastDayLoad = Date.now();
+        if (stale(token)) return;
+      }
+      draw(ov);
+    };
+    const draw = (ov) => {
+      setHeader('Übersicht', ov.demo ? '<span class="badge warn">Demo-Modus</span>' : `${ov.arrays.length} PV-Anlage${ov.arrays.length > 1 ? 'n' : ''} · ${nf(ov.arrays.reduce((s, a) => s + a.kwp, 0), 1)} kWp`, refreshBtn());
+      bindRefresh(() => { lastDayLoad = 0; load(); });
+      const lv = ov.live.values || {};
+      const pvKeys = ov.arrays.map((a) => `pv:${a.id}`);
+      const pvVals = pvKeys.map((k) => lv[k] && lv[k].value).filter((v) => v != null);
+      const pvNow = pvVals.length ? pvVals.reduce((a, b) => a + b, 0) : null;
+      const val = (k) => (lv[k] ? lv[k].value : null);
+      const grid = val('grid'); const soc = val('battery_soc'); const bp = val('battery_power');
+      const best = ov.forecasts.find((f) => f.source === ov.best) || ov.forecasts.find((f) => f.source === 'om:best_match');
+      const pr = ov.price;
+      const todayPrices = ov.prices.filter((s) => s.ts < dayTs(shiftDay(localDay(), 1)));
+      const avg = todayPrices.length ? todayPrices.reduce((a, s) => a + s.price, 0) / todayPrices.length : null;
+      const missing = (k) => '<span class="faint">Sensor in den Einstellungen wählen</span>';
+      const kpi = (key, icon, cls, label, value, unit, foot) => `<div class="card kpi" data-key="${key}"><div class="kpi-label"><span class="kpi-icon ${cls}">${ic(icon)}</span>${label}</div><div class="kpi-value">${value}${unit ? `<small>${unit}</small>` : ''}</div><div class="kpi-foot">${foot}</div></div>`;
+      const w = (k, v) => (v == null ? '–' : cnt(k, nf(Math.abs(v) >= 1000 ? v / 1000 : v, Math.abs(v) >= 1000 ? 2 : 0)));
+      const wu = (v) => (v == null ? '' : Math.abs(v) >= 1000 ? 'kW' : 'W');
+      const kpis = [
+        kpi('pv', 'solar', 'warn', 'PV-Leistung', w('pv', pvNow), wu(pvNow), pvVals.length ? ov.arrays.map((a) => `${esc(a.name)} ${fmtW(val(`pv:${a.id}`))}`).join(' · ') : missing()),
+        kpi('house', 'home', '', 'Hausverbrauch', w('house', val('house')), wu(val('house')), lv.house ? 'aktuell' : missing()),
+        kpi('grid', 'plug', grid != null && grid < 0 ? 'ok' : '', grid != null && grid < 0 ? 'Einspeisung' : 'Netzbezug', w('grid', grid == null ? null : Math.abs(grid)), wu(grid), lv.grid ? (grid > 0 ? 'Strom wird gekauft' : grid < 0 ? 'Überschuss geht ins Netz' : 'ausgeglichen') : missing()),
+        kpi('batt', 'battery', 'ok', 'Batterie', soc == null ? '–' : cnt('soc', nf(soc, 0)), soc == null ? '' : '%', bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'),
+        kpi('price', 'euro', pr && avg != null && pr.price <= avg ? 'ok' : 'warn', 'Strompreis jetzt', pr ? cnt('price', nf(pr.price, 1)) : '–', pr ? 'ct/kWh' : '', pr ? `Börse ${nf(pr.spot, 1)} ct · Ø heute ${nf(avg, 1)} ct` : 'noch keine Preise'),
+        kpi('today', 'sun', 'up', 'PV heute', cnt('prod', nf(ov.produced_kwh, 1)), 'kWh', best ? `Prognose ${nf(best.today, 1)} kWh (${esc(best.label)}) · morgen ${nf(best.tomorrow, 1)}` : 'noch keine Prognose'),
+      ].join('');
+
+      const ranking = ov.ranking || [];
+      const sources = day ? Object.keys(day.forecasts) : [];
+      const hidden = hiddenSet(ranking, sources);
+      const lines = sources.sort((a, b) => (ranking.indexOf(a) + 1 || 99) - (ranking.indexOf(b) + 1 || 99)).map((s) => ({ key: s, label: day.labels[s], color: srcColor(s) }));
+      const statusRows = Object.entries(ov.status).filter(([k]) => !k.startsWith('act:') || !ov.status[k].ok).map(([k, s]) => `<div class="list-item"><span class="dot ${s.ok ? 'ok' : 'err'}"></span><div class="grow"><div class="title">${esc(k === 'price' ? 'Börsenstrompreis' : k === 'actual' ? 'Messwerte aus Home Assistant' : k === 'ha' ? 'Home Assistant' : s.label)}</div><div class="meta ${s.ok ? '' : 'err'}">${s.ok ? `abgerufen ${fmtAgo(s.at)}` : esc(s.text)}</div></div></div>`).join('');
+      const acc = (ov.accuracy || []).slice(0, 5);
+      const bf = ov.backfill;
+      el.innerHTML = `<div class="grid kpis">${kpis}</div>
+        <div class="grid dash">
+          <div class="card"><div class="card-head"><h2>PV-Erzeugung heute &amp; morgen <span class="sub">stündlich · Prognose kurzfristig</span></h2></div>
+            <div class="card-body">${legendHTML({ ...MEASURED, label: 'Gemessen', color: 'var(--measured)' }, lines, hidden)}<div class="chart tall" id="pvChart"></div></div></div>
+          <div class="card"><div class="card-head"><h2>Genauigkeit <span class="sub">letzte 30 Tage · Vortag</span></h2><a class="btn sm" href="#/accuracy">Details</a></div>
+            <div class="card-body flush"><div class="list">${acc.length ? acc.map((r, i) => `<div class="list-item"><span class="rank ${i === 0 ? 'r1' : ''}">${i + 1}</span><span class="swatch-dot" style="background:${srcColor(r.source)}"></span><div class="grow"><div class="title">${esc(r.label)}</div><div class="meta">Tagesabweichung Ø ${pct(r.day_nmae_pct)} · ${r.days} Tage</div></div><b class="num">${pct(r.score, 0)}</b></div>`).join('')
+              : `<div class="muted" style="padding:6px 18px 14px;font-size:13px">Sobald Messwerte und Prognosen für einige Tage vorliegen, erscheint hier die Rangliste der Prognosequellen.</div>`}</div></div></div>
+        </div>
+        <div class="grid dash">
+          <div class="card"><div class="card-head"><h2>Strompreis heute &amp; morgen <span class="sub">inkl. Aufschläge und MwSt</span></h2><a class="btn sm" href="#/prices">Details</a></div>
+            <div class="card-body"><div class="chart" id="priceChart"></div></div></div>
+          <div class="card"><div class="card-head"><h2>Datenquellen</h2></div>
+            <div class="card-body flush">${bf.running ? `<div style="padding:4px 18px 12px"><div class="muted" style="font-size:13px">${ic('database')} ${esc(bf.text)} (${bf.done}/${bf.total})</div><div class="progress"><i style="width:${(bf.done / Math.max(1, bf.total)) * 100}%"></i></div></div>` : ''}
+              <div class="list status-list">${statusRows || '<div class="muted" style="padding:6px 18px 14px;font-size:13px">Erster Abruf läuft …</div>'}</div></div></div>
+        </div>`;
+      // PV chart: today + tomorrow
+      if (day && tomorrow) {
+        const xs = [...day.hours, ...tomorrow.hours];
+        const bar = { ...MEASURED, cls: 'bar-m', values: [...day.actual, ...tomorrow.actual] };
+        const ln = lines.filter((l) => !hidden.has(l.key)).map((l) => ({ ...l, values: [...((day.forecasts[l.key] || {}).d0 || day.hours.map(() => null)), ...((tomorrow.forecasts[l.key] || {}).d0 || tomorrow.hours.map(() => null))] }));
+        chart($('#pvChart'), { xs, step: 3600, bar, lines: ln, fmt: (v) => fmtW(v).replace('W', 'Wh'), axisFmt: (v) => (v >= 1000 ? `${nf(v / 1000, 1)} kWh` : `${nf(v)} Wh`), head: (ts) => `${fmtDay(ts)} ${fmtHour(ts)}–${fmtHour(ts + 3600)}`, tick: (ts) => (new Date(ts * 1000).getHours() === 0 ? fmtDay(ts) : fmtHour(ts)), tickAt: (ts) => new Date(ts * 1000).getHours() % 6 === 0, height: 280, now: ov.now, noAnim: drawn, onClick: (i) => { location.hash = `#/day?d=${i < day.hours.length ? day.day : tomorrow.day}`; } });
+        $$('.legend button[data-series]', el).forEach((b) => b.addEventListener('click', () => { toggleHidden(b.dataset.series); draw(S.overview); }));
+      }
+      priceChart($('#priceChart'), ov.prices, ov.now, 200);
+      drawn = true;
+    };
+    await load();
+    const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 15000);
+    S.cleanup.push(() => clearInterval(timer));
+  }
+
+  function priceChart(el, slots, now, height = 220) {
+    if (!el) return;
+    const xs = slots.map((s) => s.ts);
+    const step = slots.length > 1 ? slots[1].ts - slots[0].ts : 900;
+    const values = slots.map((s) => s.price);
+    chart(el, {
+      xs, step, lines: [], height, now,
+      bar: { label: 'Strompreis', color: 'var(--price)', cls: 'bar-p', values, clsFor: (i, v) => `${v < 0 ? 'neg' : ''} ${xs[i] + step <= now ? 'past' : ''}` },
+      fmt: (v) => ctkwh(v, 2), axisFmt: (v) => `${nf(v)} ct`,
+      head: (ts) => `${fmtDay(ts)} ${fmtHour(ts)}–${fmtHour(ts + step)}`,
+      tick: (ts) => (new Date(ts * 1000).getHours() === 0 ? fmtDay(ts) : fmtHour(ts)),
+      tickAt: (ts) => { const d = new Date(ts * 1000); return d.getMinutes() === 0 && d.getHours() % 6 === 0; },
+      emptyText: 'Noch keine Preise.',
+    });
+  }
+
+  // --------------------------------------------------------------- accuracy
+  async function renderAccuracy(el, token) {
+    const cfg = { days: 30, horizon: 'd1', series: '_total', common: false, ...store.get('acc', {}) };
+    if (!S.settings) await loadSettings();
+    const arrays = S.settings.arrays.filter((a) => a.kwp > 0);
+    if (!arrays.length) { welcome(el); return; }
+    const load = async () => {
+      store.set('acc', cfg);
+      const data = await api(`accuracy?days=${cfg.days}&horizon=${cfg.horizon}&series=${encodeURIComponent(cfg.series)}&common=${cfg.common ? 1 : 0}`);
+      if (stale(token)) return;
+      draw(data);
+    };
+    const toolbar = () => `<div class="toolbar">
+        <div class="seg" id="accDays">${[[7, '7 Tage'], [14, '14 Tage'], [30, '30 Tage'], [90, '90 Tage'], [365, '1 Jahr']].map(([d, l]) => `<button data-v="${d}" class="${cfg.days === d ? 'active' : ''}">${l}</button>`).join('')}</div>
+        <div class="seg" id="accHz">${HORIZONS.map(([k, l, t]) => `<button data-v="${k}" title="${esc(t)}" class="${cfg.horizon === k ? 'active' : ''}">${l}</button>`).join('')}</div>
+        ${arrays.length > 1 ? `<select class="input" id="accSeries" style="width:auto"><option value="_total">Alle Anlagen</option>${arrays.map((a) => `<option value="${a.id}" ${cfg.series === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>` : ''}
+        <label class="check" title="Nur Stunden vergleichen, für die alle Quellen einen Wert haben – fairer, wenn Quellen unterschiedlich lange gesammelt wurden"><input type="checkbox" id="accCommon" ${cfg.common ? 'checked' : ''}>Nur gemeinsame Stunden</label>
+      </div>`;
+    const draw = (d) => {
+      setHeader('Prognose-Check', `${new Date(d.start * 1000).toLocaleDateString('de-DE')} – ${new Date((d.end - 1) * 1000).toLocaleDateString('de-DE')} · ${HORIZONS.find((h) => h[0] === cfg.horizon)[2]}`);
+      const res = d.results;
+      if (!res.length) {
+        el.innerHTML = `${toolbar()}<div class="card"><div class="card-body">${empty('target', 'Noch nichts zu vergleichen', 'Für den Vergleich braucht es Messwerte der PV-Anlagen (Sensor mit Langzeitstatistik, siehe Einstellungen) und Prognosen für denselben Zeitraum. Das Archiv der Wettermodelle wird beim ersten Start automatisch nachgeladen – das dauert ein paar Minuten.')}</div></div>`;
+        bind(); return;
+      }
+      const bestDay = Math.min(...res.filter((r) => r.day_nmae_pct != null).map((r) => r.day_nmae_pct));
+      const rows = res.map((r, i) => `<tr>
+          <td><span class="rank ${i === 0 ? 'r1' : ''}">${i + 1}</span></td>
+          <td><div class="cell-main" style="min-width:160px"><span class="swatch-dot" style="background:${srcColor(r.source)}"></span><span class="t">${esc(r.label)}</span></div></td>
+          <td><div class="score"><div class="bar"><i style="width:${r.score || 0}%"></i></div><b>${pct(r.score, 1)}</b></div></td>
+          <td class="num ${r.day_nmae_pct === bestDay ? 'best' : ''}">${pct(r.day_nmae_pct)}</td>
+          <td class="num"><span class="${r.bias_pct > 0 ? 'pos' : 'neg'}">${signed(r.bias_pct)} %</span></td>
+          <td class="num">${kwh(r.day_max_err_kwh)}</td>
+          <td class="num hide-md">${nf(r.mae_wh)} Wh</td>
+          <td class="num hide-md">${nf(r.rmse_wh)} Wh</td>
+          <td class="num">${r.days}</td></tr>`).join('');
+      const counts2 = { sunny: 0, mixed: 0, cloudy: 0 };
+      Object.values(d.classes || {}).forEach((c) => { counts2[c] += 1; });
+      const hasClasses = Object.values(counts2).some((v) => v);
+      const bestIn = {};
+      Object.keys(counts2).forEach((c) => {
+        const vals = res.map((r) => r.by_class && r.by_class[c] && r.by_class[c].nmae_pct).filter((v) => v != null);
+        bestIn[c] = vals.length ? Math.min(...vals) : null;
+      });
+      const classTable = hasClasses ? `<div class="card"><div class="card-head"><h2>Nach Wetterlage <span class="sub">Stundenfehler relativ zur Erzeugung – kleiner ist besser</span></h2></div>
+        <div class="card-body flush"><div class="table-wrap"><table class="table"><thead><tr><th>Quelle</th>${Object.entries(CLASS_LABEL).map(([k, [l, icon]]) => `<th class="num">${ic(icon)} ${l} <span class="faint">(${counts2[k]} T.)</span></th>`).join('')}</tr></thead><tbody>
+        ${res.map((r) => `<tr><td><div class="cell-main" style="min-width:160px"><span class="swatch-dot" style="background:${srcColor(r.source)}"></span><span class="t">${esc(r.label)}</span></div></td>${Object.keys(CLASS_LABEL).map((c) => { const v = r.by_class && r.by_class[c]; return `<td class="num ${v && v.nmae_pct === bestIn[c] ? 'best' : ''}">${v ? `${pct(v.nmae_pct, 0)} <span class="faint">(${signed(v.bias_pct, 0)} %)</span>` : '–'}</td>`; }).join('')}</tr>`).join('')}
+        </tbody></table></div><div class="muted" style="padding:10px 18px 12px;font-size:12.5px;border-top:1px solid var(--border)">Wetterlage aus der gemessenen Erzeugung im Verhältnis zu einem wolkenlosen Tag: sonnig ≥ 60 %, wechselhaft 30–60 %, trüb &lt; 30 %. In Klammern die systematische Abweichung (+ = Prognose zu hoch).</div></div></div>` : '';
+      const ranking = res.map((r) => r.source);
+      const all = Object.keys(d.daily.sources);
+      const hidden = hiddenSet(ranking, all);
+      const lines = all.sort((a, b) => ranking.indexOf(a) - ranking.indexOf(b)).map((s) => ({ key: s, label: d.labels[s], color: srcColor(s) }));
+      el.innerHTML = `${toolbar()}
+        <div class="card"><div class="card-head"><h2>Rangliste</h2></div>
+          <div class="card-body flush"><p class="explain" style="padding:0 18px">${ic('trophy')} Am genauesten: <b>${esc(res[0].label)}</b> – im Mittel ${pct(res[0].day_nmae_pct)} Abweichung beim Tagesertrag.
+            <span class="faint">Genauigkeit = 100 % minus mittlerer Stundenfehler relativ zur Erzeugung. Tagesabweichung = Fehler beim Tagesertrag. Summe = systematische Über- (+) oder Unterschätzung.</span></p>
+          <div class="table-wrap"><table class="table"><thead><tr><th></th><th>Quelle</th><th>Genauigkeit</th><th class="num">Tagesabw. Ø</th><th class="num">Summe</th><th class="num">Größter Tagesfehler</th><th class="num hide-md">Stundenfehler Ø</th><th class="num hide-md">RMSE</th><th class="num">Tage</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
+        ${classTable}
+        <div class="card"><div class="card-head"><h2>Tageserträge <span class="sub">Klick auf einen Tag zeigt den Stundenverlauf</span></h2></div>
+          <div class="card-body">${legendHTML(MEASURED, lines, hidden)}<div class="chart tall" id="dailyChart"></div></div></div>`;
+      const days = d.daily.days;
+      chart($('#dailyChart'), {
+        xs: days.map(dayTs), step: 86400, height: 280,
+        bar: { ...MEASURED, cls: 'bar-m', values: days.map((k) => d.daily.actual[k] ?? null) },
+        lines: lines.filter((l) => !hidden.has(l.key)).map((l) => ({ ...l, values: days.map((k) => d.daily.sources[l.key][k] ?? null) })),
+        fmt: (v) => kwh(v), axisFmt: (v) => `${nf(v)} kWh`, head: (ts) => fmtDay(ts), tick: (ts) => new Date(ts * 1000).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }), tickCenter: true,
+        onClick: (i) => { location.hash = `#/day?d=${days[i]}`; },
+      });
+      $$('.legend button[data-series]', el).forEach((b) => b.addEventListener('click', () => { toggleHidden(b.dataset.series); draw(d); }));
+      bind();
+    };
+    const bind = () => {
+      $$('#accDays button').forEach((b) => b.addEventListener('click', () => { cfg.days = Number(b.dataset.v); load(); }));
+      $$('#accHz button').forEach((b) => b.addEventListener('click', () => { cfg.horizon = b.dataset.v; load(); }));
+      const sel = $('#accSeries'); if (sel) sel.addEventListener('change', () => { cfg.series = sel.value; load(); });
+      $('#accCommon').addEventListener('change', (e) => { cfg.common = e.target.checked; load(); });
+    };
+    await load();
+  }
+
+  // -------------------------------------------------------------------- day
+  async function renderDay(el, token) {
+    const q = query();
+    const day = q.get('d') || localDay();
+    const cfg = { horizon: 'd0', series: '_total', ...store.get('dayCfg', {}) };
+    if (!S.settings) await loadSettings();
+    const arrays = S.settings.arrays.filter((a) => a.kwp > 0);
+    if (!arrays.length) { welcome(el); return; }
+    const d = await api(`day?day=${day}&series=${encodeURIComponent(cfg.series)}`);
+    if (stale(token)) return;
+    const draw = () => {
+      store.set('dayCfg', cfg);
+      setHeader('Tagesverlauf', fmtDate(dayTs(day)));
+      const sources = Object.keys(d.forecasts);
+      const ranking = (S.overview && S.overview.ranking) || [];
+      const hidden = hiddenSet(ranking, sources);
+      const lines = sources.sort((a, b) => (ranking.indexOf(a) + 1 || 99) - (ranking.indexOf(b) + 1 || 99)).map((s) => ({ key: s, label: d.labels[s], color: srcColor(s) }));
+      const actSum = d.actual.some((v) => v != null) ? d.actual.reduce((a, v) => a + (v || 0), 0) / 1000 : null;
+      const rows = lines.map((l) => {
+        const vals = (d.forecasts[l.key] || {})[cfg.horizon];
+        if (!vals) return '';
+        const total = vals.reduce((a, v) => a + (v || 0), 0) / 1000;
+        const dev = actSum ? ((total - actSum) / actSum) * 100 : null;
+        return { l, total, dev };
+      }).filter(Boolean).sort((a, b) => (a.dev == null ? 1e9 : Math.abs(a.dev)) - (b.dev == null ? 1e9 : Math.abs(b.dev)));
+      const today = localDay();
+      el.innerHTML = `<div class="toolbar">
+          <div class="day-nav"><button class="icon-btn" id="dPrev" title="Vorheriger Tag">${ic('chevronL')}</button><input class="input" type="date" id="dPick" value="${day}"><button class="icon-btn" id="dNext" title="Nächster Tag">${ic('chevron')}</button>${day !== today ? `<button class="btn sm" id="dToday">Heute</button>` : ''}</div>
+          <div class="seg" id="dHz">${HORIZONS.map(([k, l, t]) => `<button data-v="${k}" title="${esc(t)}" class="${cfg.horizon === k ? 'active' : ''}">${l}</button>`).join('')}</div>
+          ${arrays.length > 1 ? `<select class="input" id="dSeries" style="width:auto"><option value="_total">Alle Anlagen</option>${arrays.map((a) => `<option value="${a.id}" ${cfg.series === a.id ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select>` : ''}
+        </div>
+        <div class="grid dash">
+          <div class="card"><div class="card-head"><h2>PV-Erzeugung <span class="sub">stündlich</span></h2></div>
+            <div class="card-body">${legendHTML(MEASURED, lines, hidden)}<div class="chart tall" id="dayChart"></div></div></div>
+          <div class="card"><div class="card-head"><h2>Tagessumme</h2></div><div class="card-body flush">
+            <div class="list"><div class="list-item"><span class="swatch-dot" style="background:var(--measured);opacity:.6"></span><div class="grow"><div class="title">Gemessen</div><div class="meta">${actSum == null ? 'keine Messwerte' : 'volle Stunden'}</div></div><b class="num">${kwh(actSum)}</b></div>
+            ${rows.map((r) => `<div class="list-item"><span class="swatch-dot" style="background:${r.l.color}"></span><div class="grow"><div class="title">${esc(r.l.label)}</div><div class="meta">${r.dev == null ? '&nbsp;' : `<span class="${r.dev > 0 ? 'pos' : 'neg'}">${signed(r.dev)} %</span> zur Messung`}</div></div><b class="num">${kwh(r.total)}</b></div>`).join('')}</div></div></div>
+        </div>
+        <div class="card"><div class="card-head"><h2>Strompreis <span class="sub">inkl. Aufschläge und MwSt</span></h2></div><div class="card-body"><div class="chart" id="dayPrice"></div></div></div>`;
+      chart($('#dayChart'), {
+        xs: d.hours, step: 3600, height: 300, now: Math.floor(Date.now() / 1000),
+        bar: { ...MEASURED, cls: 'bar-m', values: d.actual },
+        lines: lines.filter((l) => !hidden.has(l.key)).map((l) => ({ ...l, values: (d.forecasts[l.key] || {})[cfg.horizon] || d.hours.map(() => null) })),
+        fmt: (v) => `${nf(v)} Wh`, axisFmt: (v) => (v >= 1000 ? `${nf(v / 1000, 1)} kWh` : `${nf(v)} Wh`),
+        head: (ts) => `${fmtHour(ts)}–${fmtHour(ts + 3600)}`, tickAt: (ts) => new Date(ts * 1000).getHours() % 3 === 0,
+        emptyText: 'Für diesen Tag gibt es keine Daten.',
+      });
+      priceChart($('#dayPrice'), d.prices, Math.floor(Date.now() / 1000), 180);
+      const go = (nd) => { location.hash = `#/day?d=${nd}`; };
+      $('#dPrev').addEventListener('click', () => go(shiftDay(day, -1)));
+      $('#dNext').addEventListener('click', () => go(shiftDay(day, 1)));
+      $('#dPick').addEventListener('change', (e) => { if (e.target.value) go(e.target.value); });
+      if ($('#dToday')) $('#dToday').addEventListener('click', () => go(today));
+      $$('#dHz button').forEach((b) => b.addEventListener('click', () => { cfg.horizon = b.dataset.v; draw(); }));
+      const sel = $('#dSeries'); if (sel) sel.addEventListener('change', () => { cfg.series = sel.value; store.set('dayCfg', cfg); navigate(); });
+      $$('.legend button[data-series]', el).forEach((b) => b.addEventListener('click', () => { toggleHidden(b.dataset.series); draw(); }));
+    };
+    draw();
+  }
+
+  // ----------------------------------------------------------------- prices
+  function cheapestWindow(slots, hours, from) {
+    const fut = slots.filter((s) => s.ts + s.dur > from);
+    if (!fut.length) return null;
+    const step = fut[0].dur; const n = Math.round((hours * 3600) / step);
+    if (fut.length < n) return null;
+    let best = null;
+    for (let i = 0; i + n <= fut.length; i += 1) {
+      const avg = fut.slice(i, i + n).reduce((a, s) => a + s.price, 0) / n;
+      if (!best || avg < best.avg) best = { avg, start: fut[i].ts, end: fut[i + n - 1].ts + step };
+    }
+    return best;
+  }
+  async function renderPrices(el, token) {
+    const d = await api(`prices?day=${localDay()}&days=2`);
+    if (stale(token)) return;
+    const now = d.now; const slots = d.slots; const t = d.tariff;
+    const tomorrowTs = dayTs(shiftDay(localDay(), 1));
+    const stats = (list) => (list.length ? { avg: list.reduce((a, s) => a + s.price, 0) / list.length, min: Math.min(...list.map((s) => s.price)), max: Math.max(...list.map((s) => s.price)) } : null);
+    const today = stats(slots.filter((s) => s.ts < tomorrowTs));
+    const tomorrow = stats(slots.filter((s) => s.ts >= tomorrowTs));
+    const cur = slots.find((s) => s.ts <= now && now < s.ts + s.dur);
+    setHeader('Strompreise', `Börsenpreis ${esc(t.bidding_zone)} (EPEX Day-Ahead) + ${nf(t.markup_ct, 2)} ct Aufschlag netto + ${nf(t.vat, 0)} % MwSt`);
+    const kpi = (icon, cls, label, value, foot) => `<div class="card kpi"><div class="kpi-label"><span class="kpi-icon ${cls}">${ic(icon)}</span>${label}</div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`;
+    const windows = [1, 2, 3, 4].map((h) => [h, cheapestWindow(slots, h, now)]);
+    el.innerHTML = `<div class="grid kpis">
+        ${kpi('euro', '', 'Jetzt', cur ? `${cnt('p', nf(cur.price, 1))}<small>ct/kWh</small>` : '–', cur ? `Börse ${nf(cur.spot, 2)} ct/kWh netto` : 'kein Preis')}
+        ${kpi('clock', 'ok', 'Heute', today ? `${nf(today.avg, 1)}<small>ct Ø</small>` : '–', today ? `min ${nf(today.min, 1)} · max ${nf(today.max, 1)} ct` : '')}
+        ${kpi('clock', 'up', 'Morgen', tomorrow ? `${nf(tomorrow.avg, 1)}<small>ct Ø</small>` : '–', tomorrow ? `min ${nf(tomorrow.min, 1)} · max ${nf(tomorrow.max, 1)} ct` : 'erscheint gegen 13 Uhr')}
+      </div>
+      <div class="card"><div class="card-head"><h2>Verlauf <span class="sub">${slots.length > 1 && slots[1].ts - slots[0].ts === 900 ? 'Viertelstunden' : 'Stunden'}</span></h2></div><div class="card-body"><div class="chart tall" id="prChart"></div></div></div>
+      <div class="card"><div class="card-head"><h2>Günstigste Zeitfenster <span class="sub">ab jetzt, soweit Preise bekannt sind</span></h2></div><div class="card-body">
+        <div class="window-list">${windows.map(([h, w]) => `<div class="window"><div class="l">${h} Stunde${h > 1 ? 'n' : ''} am Stück</div>${w ? `<div class="v">${nf(w.avg, 1)} ct</div><div class="s">${fmtDay(w.start)} ${fmtHour(w.start)}–${fmtHour(w.end)}</div>` : '<div class="v">–</div><div class="s">zu wenig Preise</div>'}</div>`).join('')}</div>
+        <p class="faint" style="font-size:12.5px;margin:14px 0 0">Die Aufschläge (Netzentgelt, Umlagen, Stromsteuer, Anbieteraufschlag) und die Einspeisevergütung stellst du unter <a href="#/settings?tab=tariff">Einstellungen › Strompreis</a> ein. Später plant EnergyPilot damit das Laden von Batterie und E-Auto.</p>
+      </div></div>`;
+    priceChart($('#prChart'), slots, now, 300);
+  }
+
+  // --------------------------------------------------------------- settings
+  const SET_TABS = [['arrays', 'solar', 'PV-Anlagen'], ['sources', 'cloudSun', 'Prognosequellen'], ['tariff', 'euro', 'Strompreis'], ['sensors', 'sliders', 'Sensoren & Standort'], ['look', 'palette', 'Darstellung']];
+  async function renderSettings(el, token) {
+    const q = query();
+    let tab = q.get('tab') || store.get('settingsTab', 'arrays');
+    if (!SET_TABS.some((t) => t[0] === tab)) tab = 'arrays';
+    store.set('settingsTab', tab);
+    await loadSettings();
+    if (stale(token)) return;
+    el.innerHTML = `<div class="seg" id="setTabs" style="margin-bottom:16px">${SET_TABS.map(([k, icon, label]) => `<button data-tab="${k}" class="${tab === k ? 'active' : ''}">${ic(icon)}${label}</button>`).join('')}</div><div id="setBody"></div>`;
+    $$('#setTabs button').forEach((b) => b.addEventListener('click', () => { if (b.dataset.tab !== tab) location.hash = `#/settings?tab=${b.dataset.tab}`; }));
+    const body = $('#setBody');
+    const fn = { arrays: renderArrays, sources: renderSources, tariff: renderTariff, sensors: renderSensors, look: renderLook }[tab];
+    await fn(body, token);
+  }
+
+  function entityOptions(list, value, kinds) {
+    const opts = list.filter((e) => kinds.includes(e.kind));
+    const known = opts.some((e) => e.entity_id === value);
+    return `<option value="">– kein Sensor –</option>${value && !known ? `<option value="${esc(value)}" selected>${esc(value)}</option>` : ''}${opts.map((e) => `<option value="${esc(e.entity_id)}" ${e.entity_id === value ? 'selected' : ''}>${esc(e.name)} (${esc(e.state)} ${esc(e.unit)})${e.statistics ? '' : ' – keine Statistik'}</option>`).join('')}`;
+  }
+  const COMPASS = [['N', 0], ['NO', 45], ['O', 90], ['SO', 135], ['S', 180], ['SW', 225], ['W', 270], ['NW', 315]];
+  const dirName = (az) => { const i = Math.round(((az % 360) + 360) % 360 / 45) % 8; return ['Nord', 'Nordost', 'Ost', 'Südost', 'Süd', 'Südwest', 'West', 'Nordwest'][i]; };
+
+  async function renderArrays(el) {
+    setHeader('Einstellungen', 'PV-Anlagen – eine pro Ausrichtung');
+    const draw = () => {
+      const arrays = S.settings.arrays;
+      el.innerHTML = `<div class="card"><div class="card-head"><h2>PV-Anlagen <span class="sub">${arrays.length}</span></h2><button class="btn primary sm" id="addArr">${ic('plus')}Anlage hinzufügen</button></div>
+        <div class="card-body flush"><div class="list">${arrays.map((a) => `<div class="list-item clickable" data-edit="${a.id}">
+            <div class="avatar accent">${ic('solar')}</div>
+            <div class="grow"><div class="title">${esc(a.name)}</div><div class="meta">${nf(a.kwp, 2)} kWp · ${nf(a.tilt)}° Neigung · ${dirName(a.azimuth)} (${nf(a.azimuth)}°)${a.ac_max_kw ? ` · max. ${nf(a.ac_max_kw, 1)} kW` : ''} · ${a.sensor ? `<span class="mono">${esc(a.sensor)}</span>` : '<span class="pos">kein Messsensor</span>'}</div></div>
+            <button class="icon-btn" title="Bearbeiten">${ic('edit')}</button></div>`).join('')
+          || '<div class="muted" style="padding:6px 18px 14px;font-size:13px">Noch keine Anlage. Lege für jede Dachfläche bzw. Ausrichtung eine eigene Anlage an – idealerweise mit dem Sensor des Wechselrichters, der genau diese Fläche misst.</div>'}</div></div></div>
+        <div class="notice info" style="margin-top:16px">${ic('info')}<div><b>Messsensor:</b> Ein Leistungssensor (W/kW, z. B. „AC-Leistung“ des Fronius-Wechselrichters) oder ein Energiezähler (Wh/kWh). Er braucht eine Langzeitstatistik (state_class) – dann liest EnergyPilot die Erzeugung der letzten ${S.settings.backfill_days} Tage rückwirkend aus Home Assistant und kann die Prognosen sofort vergleichen.</div></div>`;
+      $('#addArr').addEventListener('click', () => arrayForm());
+      $$('[data-edit]').forEach((r) => r.addEventListener('click', () => arrayForm(S.settings.arrays.find((a) => a.id === r.dataset.edit))));
+    };
+    async function arrayForm(cfg = {}) {
+      const isNew = !cfg.id;
+      let ents = [];
+      try { ents = await loadEntities(); } catch (e) { toast(`Sensoren konnten nicht geladen werden: ${e.message}`, 'err'); }
+      modal({
+        title: isNew ? 'PV-Anlage hinzufügen' : 'PV-Anlage bearbeiten',
+        body: `<div class="form-grid">
+          <div class="field span-2"><label>Name</label><input class="input" id="a_name" value="${esc(cfg.name || '')}" placeholder="z. B. Dach Ost"></div>
+          <div class="field"><label>Leistung (kWp)</label><input class="input" id="a_kwp" type="number" step="0.01" min="0" value="${cfg.kwp ?? ''}" placeholder="z. B. 8,4"><span class="hint">Summe der Modul-Nennleistungen</span></div>
+          <div class="field"><label>Neigung (°)</label><input class="input" id="a_tilt" type="number" step="1" min="0" max="90" value="${cfg.tilt ?? 30}"><span class="hint">0° = flach, 90° = senkrecht</span></div>
+          <div class="field span-2"><label>Ausrichtung (°)</label><input class="input" id="a_az" type="number" step="1" min="0" max="359" value="${cfg.azimuth ?? 180}">
+            <div class="compass" id="a_comp">${COMPASS.map(([l, v]) => `<button type="button" data-az="${v}">${l}</button>`).join('')}</div><span class="hint" id="a_azh">Kompassrichtung, in die die Module zeigen: 90° = Ost, 180° = Süd, 270° = West</span></div>
+          <div class="field span-2"><label>Messsensor (Wechselrichter)</label><select class="input" id="a_sensor">${entityOptions(ents, cfg.sensor || '', ['power', 'energy'])}</select><span class="hint">Leistung (W/kW) oder Energiezähler (Wh/kWh) genau dieser Anlage</span></div>
+        </div>
+        <details style="margin-bottom:6px"><summary class="muted" style="cursor:pointer;font-size:13px">Erweitert</summary>
+          <div class="form-grid" style="margin-top:12px">
+            <div class="field"><label>Systemwirkungsgrad (%)</label><input class="input" id="a_eff" type="number" step="1" min="50" max="100" value="${Math.round((cfg.efficiency ?? 0.88) * 100)}"><span class="hint">Wechselrichter, Kabel, Verschmutzung – typisch 85–90 %</span></div>
+            <div class="field"><label>Wechselrichter-Grenze (kW)</label><input class="input" id="a_ac" type="number" step="0.1" min="0" value="${cfg.ac_max_kw || ''}" placeholder="keine"><span class="hint">Maximale AC-Leistung, falls die Anlage abregelt</span></div>
+            <div class="field span-2"><label>Solcast Resource-ID <span class="faint">(optional)</span></label><input class="input mono" id="a_sc" value="${esc(cfg.solcast_id || '')}" placeholder="xxxx-xxxx-xxxx-xxxx"><span class="hint">Nur wenn Solcast unter „Prognosequellen“ eingerichtet ist</span></div>
+          </div></details>`,
+        foot: `${isNew ? '' : `<button class="btn danger left" id="a_del">${ic('trash')}Löschen</button>`}<button class="btn" data-close>Abbrechen</button><button class="btn primary" id="a_save">${ic('check')}Speichern</button>`,
+        onMount(m, close) {
+          const v = (id) => m.querySelector(id);
+          const syncComp = () => {
+            const az = Number(v('#a_az').value);
+            $$('#a_comp button', m).forEach((b) => b.classList.toggle('active', Number(b.dataset.az) === az));
+            v('#a_azh').textContent = `${dirName(az)} · 90° = Ost, 180° = Süd, 270° = West`;
+          };
+          $$('#a_comp button', m).forEach((b) => b.addEventListener('click', () => { v('#a_az').value = b.dataset.az; syncComp(); }));
+          v('#a_az').addEventListener('input', syncComp);
+          syncComp();
+          v('#a_save').addEventListener('click', (e) => withBusy(e.currentTarget, async () => {
+            const body = { id: cfg.id, name: v('#a_name').value.trim(), kwp: v('#a_kwp').value, tilt: v('#a_tilt').value, azimuth: v('#a_az').value, sensor: v('#a_sensor').value, efficiency: Number(v('#a_eff').value) / 100, ac_max_kw: v('#a_ac').value || 0, solcast_id: v('#a_sc').value.trim() };
+            if (!(Number(String(body.kwp).replace(',', '.')) > 0)) { toast('Bitte die Leistung in kWp angeben.', 'err'); return; }
+            try {
+              await api('arrays', { method: 'POST', body });
+              await loadSettings(); close(); draw();
+              toast(isNew ? 'Anlage angelegt – Prognosen und Messwerte werden jetzt geladen.' : 'Änderungen gespeichert.');
+            } catch (err) { toast(err.message, 'err'); }
+          }));
+          if (v('#a_del')) v('#a_del').addEventListener('click', async () => {
+            if (!(await confirmDialog('Anlage löschen?', `„${esc(cfg.name)}“ und alle gesammelten Prognosen und Messwerte dieser Anlage werden gelöscht.`, { ok: 'Löschen', danger: true }))) return;
+            try { await api(`arrays/${cfg.id}`, { method: 'DELETE' }); await loadSettings(); close(); draw(); toast('Anlage gelöscht.'); } catch (err) { toast(err.message, 'err'); }
+          });
+        },
+      });
+    }
+    draw();
+    if (query().get('add') === '1') { history.replaceState(null, '', '#/settings?tab=arrays'); arrayForm(); }
+  }
+
+  async function saveSettings(values, msg = 'Einstellungen gespeichert.') {
+    try { S.settings = { ...S.settings, ...(await api('settings', { method: 'POST', body: values })) }; await loadSettings(); toast(msg); return true; } catch (e) { toast(e.message, 'err'); return false; }
+  }
+
+  async function renderSources(el) {
+    setHeader('Einstellungen', 'Welche Prognosen gesammelt und verglichen werden');
+    const s = S.settings.sources;
+    const models = S.settings.models_available;
+    el.innerHTML = `<div class="grid cols-2">
+      <div class="card"><div class="card-head"><div class="avatar accent">${ic('cloudSun')}</div><h2>Open-Meteo Wettermodelle<div class="faint" style="font-weight:400;font-size:12.5px">Kostenlos, ohne Anmeldung – PV-Leistung berechnet EnergyPilot selbst</div></h2>${sw(s.open_meteo, 'id="s_om"')}</div>
+        <div class="card-body"><p class="explain">Jedes Modell wird stündlich abgerufen. Aus Global- und Diffusstrahlung und der Temperatur berechnet EnergyPilot für jede Anlage mit ihrer Neigung und Ausrichtung die Leistung. Für die Vergangenheit lädt es das Prognose-Archiv nach.</p>
+          <div class="models">${Object.entries(models).map(([k, l]) => `<label class="check"><input type="checkbox" data-model="${k}" ${s.models.includes(k) ? 'checked' : ''}><span class="swatch-dot" style="background:${srcColor(`om:${k}`)}"></span>${esc(l)}</label>`).join('')}</div></div></div>
+      <div class="card"><div class="card-head"><div class="avatar accent">${ic('sun')}</div><h2>Forecast.Solar<div class="faint" style="font-weight:400;font-size:12.5px">Kostenlos – heute und morgen, eigener PV-Rechner</div></h2>${sw(s.forecast_solar, 'id="s_fs"')}</div>
+        <div class="card-body"><p class="explain">Wird stündlich pro Anlage abgefragt (Limit 12 Abrufe pro Stunde). Nutzt die Anlagendaten aus EnergyPilot. Werte liegen erst ab dem Tag vor, an dem die Quelle aktiviert wurde.</p></div></div>
+      <div class="card"><div class="card-head"><div class="avatar accent">${ic('solar')}</div><h2>Solcast<div class="faint" style="font-weight:400;font-size:12.5px">Optional – kostenloser Hobby-Zugang mit API-Schlüssel</div></h2></div>
+        <div class="card-body">
+          <div class="field"><label>API-Schlüssel</label><input class="input mono" id="s_sckey" type="password" autocomplete="off" placeholder="${s.has_solcast_key ? 'gespeichert – leer lassen, um ihn zu behalten' : 'von toolkit.solcast.com.au'}"></div>
+          <div class="field"><label>Abrufzeiten (Uhr)</label><input class="input" id="s_schours" value="${esc(s.solcast_hours.join(', '))}"><span class="hint">Pro Zeitpunkt ein Abruf je Anlage. Der Hobby-Zugang erlaubt 10 Abrufe am Tag – bei 2 Anlagen also höchstens 5 Zeitpunkte.</span></div>
+          <p class="explain">Die Resource-ID jeder Dachfläche trägst du bei der jeweiligen PV-Anlage ein (Erweitert).</p>
+          ${s.has_solcast_key ? `<button class="btn sm" id="s_scclear">${ic('trash')}Schlüssel entfernen</button>` : ''}</div></div>
+      <div class="card"><div class="card-head"><div class="avatar accent">${ic('database')}</div><h2>Rückblick</h2></div>
+        <div class="card-body"><div class="field"><label>Tage rückwirkend laden</label><input class="input" id="s_back" type="number" min="0" max="730" value="${S.settings.backfill_days}"><span class="hint">Messwerte aus der Langzeitstatistik von Home Assistant und archivierte Wettermodell-Prognosen. Erhöhen lädt die fehlenden Tage nach.</span></div></div></div>
+    </div>
+    <div class="row" style="margin-top:16px"><button class="btn primary" id="s_save">${ic('check')}Speichern</button></div>`;
+    $('#s_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({
+      sources: {
+        open_meteo: $('#s_om').checked, forecast_solar: $('#s_fs').checked,
+        models: $$('[data-model]').filter((c) => c.checked).map((c) => c.dataset.model),
+        solcast_key: $('#s_sckey').value.trim(),
+        solcast_hours: $('#s_schours').value.split(/[,;\s]+/).filter(Boolean).map(Number).filter((n) => n >= 0 && n <= 23),
+      },
+      backfill_days: Number($('#s_back').value),
+    }).then((ok) => { if (ok) renderSources(el); })));
+    if ($('#s_scclear')) $('#s_scclear').addEventListener('click', () => saveSettings({ sources: { solcast_clear: true } }, 'Solcast-Schlüssel entfernt.').then(() => renderSources(el)));
+  }
+
+  async function renderTariff(el) {
+    setHeader('Einstellungen', 'Dynamischer Stromtarif');
+    const t = S.settings.tariff;
+    const draw = () => {
+      el.innerHTML = `<div class="grid cols-2">
+        <div class="card"><div class="card-head"><div class="avatar accent">${ic('euro')}</div><h2>Arbeitspreis</h2></div><div class="card-body">
+          <p class="explain">Dynamische Tarife wie <b>sonnen EnergyDynamic</b>, Tibber oder Rabot geben den Börsenpreis (EPEX Day-Ahead) stündlich bzw. viertelstündlich weiter. Auf den Börsenpreis kommen feste Bestandteile: Netzentgelt, Umlagen, Stromsteuer und der Aufschlag des Anbieters. Die Werte stehen im Vertrag oder auf der Rechnung.</p>
+          <div class="form-grid">
+            <div class="field"><label>Gebotszone</label><input class="input" id="t_zone" list="t_zones" value="${esc(t.bidding_zone)}"><datalist id="t_zones"><option value="DE-LU"><option value="AT"><option value="CH"><option value="NL"><option value="BE"><option value="FR"></datalist><span class="hint">Deutschland: DE-LU</span></div>
+            <div class="field"><label>Aufschlag netto (ct/kWh)</label><input class="input" id="t_markup" type="number" step="0.01" min="0" value="${t.markup_ct}"><span class="hint">Summe aller festen Preisbestandteile ohne MwSt</span></div>
+            <div class="field"><label>Mehrwertsteuer (%)</label><input class="input" id="t_vat" type="number" step="0.1" min="0" value="${t.vat}"></div>
+            <div class="field"><label>Einspeisevergütung (ct/kWh)</label><input class="input" id="t_feed" type="number" step="0.01" min="0" value="${t.feed_in_ct}"><span class="hint">Für die spätere Optimierung</span></div>
+          </div>
+          <div class="notice info" id="t_prev">${ic('info')}<div></div></div>
+          <div class="row" style="margin-top:14px"><button class="btn primary" id="t_save">${ic('check')}Speichern</button></div>
+        </div></div></div>`;
+      const prev = () => {
+        const spot = S.overview && S.overview.price ? S.overview.price.spot : 10;
+        const mk = Number($('#t_markup').value) || 0; const vat = Number($('#t_vat').value) || 0;
+        $('#t_prev div').innerHTML = `Beispiel: Börsenpreis ${nf(spot, 2)} ct + Aufschlag ${nf(mk, 2)} ct = ${nf(spot + mk, 2)} ct netto → <b>${nf((spot + mk) * (1 + vat / 100), 2)} ct/kWh</b> brutto`;
+      };
+      ['#t_markup', '#t_vat'].forEach((id) => $(id).addEventListener('input', prev));
+      prev();
+      $('#t_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({ tariff: { bidding_zone: $('#t_zone').value, markup_ct: $('#t_markup').value, vat: $('#t_vat').value, feed_in_ct: $('#t_feed').value } })));
+    };
+    draw();
+  }
+
+  async function renderSensors(el) {
+    setHeader('Einstellungen', 'Sensoren für Live-Werte und spätere Optimierung');
+    let ents = [];
+    try { ents = await loadEntities(); } catch (e) { toast(`Sensoren konnten nicht geladen werden: ${e.message}`, 'err'); }
+    const s = S.settings.sensors; const loc = S.settings.location; const ha = S.settings.ha_location;
+    el.innerHTML = `<div class="grid cols-2">
+      <div class="card"><div class="card-head"><div class="avatar accent">${ic('sliders')}</div><h2>Sensoren</h2></div><div class="card-body">
+        <div class="field"><label>Hausverbrauch</label><select class="input" id="n_house">${entityOptions(ents, s.house, ['power', 'energy'])}</select><span class="hint">Gesamtverbrauch des Hauses – Grundlage der späteren Verbrauchsprognose</span></div>
+        <div class="field"><label>Netzleistung</label><select class="input" id="n_grid">${entityOptions(ents, s.grid, ['power'])}</select><span class="hint">Vom Smartmeter: positiv = Bezug, negativ = Einspeisung</span></div>
+        <div class="field"><label>Batterie Ladezustand</label><select class="input" id="n_soc">${entityOptions(ents, s.battery_soc, ['percent'])}</select></div>
+        <div class="field"><label>Batterie Leistung</label><select class="input" id="n_bp">${entityOptions(ents, s.battery_power, ['power'])}</select><span class="hint">positiv = Laden, negativ = Entladen</span></div>
+      </div></div>
+      <div class="card"><div class="card-head"><div class="avatar accent">${ic('compass')}</div><h2>Standort</h2></div><div class="card-body">
+        <p class="explain">Standardmäßig wird der Standort aus Home Assistant verwendet${ha ? ` (${nf(ha[0], 3)}, ${nf(ha[1], 3)})` : ''}. Nur ausfüllen, wenn die Anlage woanders steht.</p>
+        <div class="form-grid"><div class="field"><label>Breitengrad</label><input class="input" id="n_lat" type="number" step="0.0001" value="${loc.latitude ?? ''}" placeholder="${ha ? ha[0] : ''}"></div>
+        <div class="field"><label>Längengrad</label><input class="input" id="n_lon" type="number" step="0.0001" value="${loc.longitude ?? ''}" placeholder="${ha ? ha[1] : ''}"></div></div>
+        <span class="hint faint" style="font-size:12px">Eine Änderung verwirft die gespeicherten Wetterdaten und lädt sie für den neuen Ort neu.</span>
+      </div></div></div>
+      <div class="row" style="margin-top:16px"><button class="btn primary" id="n_save">${ic('check')}Speichern</button></div>`;
+    $('#n_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({
+      sensors: { house: $('#n_house').value, grid: $('#n_grid').value, battery_soc: $('#n_soc').value, battery_power: $('#n_bp').value },
+      location: { latitude: $('#n_lat').value, longitude: $('#n_lon').value },
+    })));
+  }
+
+  function renderLook(el) {
+    setHeader('Einstellungen', 'Design und Akzentfarbe');
+    const draw = () => {
+      const theme = store.get('theme', 'auto'); const accent = store.get('accent', 'blue');
+      el.innerHTML = `<div class="card"><div class="card-head"><h2>Design</h2></div><div class="card-body">
+          <div class="seg" id="lookTheme">${THEMES.map(([k, icon, label]) => `<button data-theme-set="${k}" class="${theme === k ? 'active' : ''}">${ic(icon)}${esc(label.replace('Design: ', '').replace(/^./, (c) => c.toUpperCase()))}</button>`).join('')}</div>
+          <p class="faint" style="font-size:12.5px;margin:10px 0 0">„Automatisch“ folgt der Einstellung von Betriebssystem bzw. Browser.</p></div></div>
+        <div class="card" style="margin-top:16px"><div class="card-head"><h2>Akzentfarbe</h2></div><div class="card-body">
+          <div class="swatches">${Object.entries(ACCENTS).map(([k, a]) => `<button class="swatch ${accent === k ? 'active' : ''}" data-accent="${k}" style="--sw:${a[1]}" title="${esc(a[0])}" aria-pressed="${accent === k}"><i>${ic('check')}</i><span>${esc(a[0])}</span></button>`).join('')}</div>
+          <p class="faint" style="font-size:12.5px;margin:12px 0 0">Gilt für Schaltflächen und Hervorhebungen. Die Farben der Prognosequellen bleiben gleich, damit jede Quelle überall wiedererkennbar ist.</p></div></div>`;
+      $$('[data-theme-set]', el).forEach((b) => b.addEventListener('click', () => { setTheme(b.dataset.themeSet); draw(); }));
+      $$('[data-accent]', el).forEach((b) => b.addEventListener('click', () => { store.set('accent', b.dataset.accent); withTransition(applyAccent); draw(); }));
+    };
+    draw();
+  }
+
+  const RENDER = { dashboard: renderDashboard, accuracy: renderAccuracy, day: renderDay, prices: renderPrices, settings: renderSettings };
+  // -------------------------------------------------------------- UI pieces
+  function toast(msg, type = 'ok') {
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.innerHTML = `${ic(type === 'err' ? 'alert' : type === 'info' ? 'info' : 'checkCircle')}<div>${esc(msg)}</div>`;
+    // the check mark draws itself
+    if (type === 'ok') el.querySelectorAll('svg path').forEach((p) => p.setAttribute('pathLength', '1'));
+    $('#toasts').appendChild(el);
+    const hide = () => { el.classList.add('leaving'); setTimeout(() => el.remove(), reducedMotion() ? 0 : 220); };
+    const t = setTimeout(hide, type === 'err' ? 7000 : 3500);
+    el.addEventListener('click', () => { clearTimeout(t); hide(); });
+  }
+
+  function modal({ title, body, foot = '', wide = false, cls = '', onMount, onClose }) {
+    const root = document.createElement('div');
+    root.className = 'modal-back';
+    root.innerHTML = `<div class="modal ${wide ? 'wide' : ''} ${cls}" role="dialog" aria-modal="true">
+      <div class="modal-head"><h3>${esc(title)}</h3><button class="icon-btn" data-close aria-label="Schließen">${ic('x')}</button></div>
+      <div class="modal-body">${body}</div>
+      ${foot ? `<div class="modal-foot">${foot}</div>` : ''}
+    </div>`;
+    const close = () => {
+      if (!root.isConnected || root.classList.contains('closing')) return;
+      root.classList.add('closing'); document.removeEventListener('keydown', onKey);
+      setTimeout(() => root.remove(), reducedMotion() ? 0 : 170);
+      if (onClose) onClose();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    root.addEventListener('mousedown', (e) => { if (e.target === root) close(); });
+    root.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) close(); });
+    document.addEventListener('keydown', onKey);
+    $('#modalRoot').appendChild(root);
+    const m = root.querySelector('.modal');
+    if (onMount) onMount(m, close);
+    const first = m.querySelector('input:not([type=hidden]), select, textarea');
+    if (first) first.focus();
+    return close;
+  }
+
+  function confirmDialog(title, text, { ok = 'Bestätigen', danger = false } = {}) {
+    return new Promise((resolve) => {
+      let result = false;
+      modal({
+        title,
+        body: `<p class="muted" style="margin:0 0 6px">${text}</p>`,
+        foot: `<button class="btn" data-close>Abbrechen</button><button class="btn ${danger ? 'danger solid' : 'primary'}" data-ok>${esc(ok)}</button>`,
+        onMount(m, closeFn) {
+          m.querySelector('[data-ok]').addEventListener('click', () => { result = true; closeFn(); });
+          m.querySelector('[data-ok]').focus();
+        },
+        onClose: () => resolve(result),
+      });
+    });
+  }
+
+  async function withBusy(btn, fn) {
+    const old = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; const svg = btn.querySelector('svg'); if (svg) svg.classList.add('spin'); }
+    try { return await fn(); } finally { if (btn && document.body.contains(btn)) { btn.disabled = false; btn.innerHTML = old; } }
+  }
+
+  const sw = (checked, attrs = '', disabled = false) => `<label class="switch"><input type="checkbox" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} ${attrs}><span></span></label>`;
+  const empty = (icon, title, text, action = '') => `<div class="empty"><div class="avatar accent">${ic(icon)}</div><h3>${esc(title)}</h3><p>${text}</p>${action}</div>`;
+  const errorBox = (msg) => `<div class="notice err">${ic('alert')}<div>${esc(msg)}</div></div>`;
+  const loading = (rows = 4) => `<div class="card"><div class="card-body">${Array.from({ length: rows }, () => '<div class="skeleton" style="height:18px;margin:10px 0"></div>').join('')}</div></div>`;
+  // ------------------------------------------------------------------ theme
+  const THEMES = [['auto', 'contrast', 'Design: automatisch'], ['light', 'sun', 'Design: hell'], ['dark', 'moon', 'Design: dunkel']];
+  function applyTheme(t) {
+    if (t === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', t);
+    const def = THEMES.find((x) => x[0] === t);
+    $('#themeToggle').innerHTML = `${ic(def[1])}<span>${def[2]}</span>`;
+    applyAccent();
+  }
+  // smooth cross-fade between old and new look where the browser supports it
+  function withTransition(fn) {
+    if (document.startViewTransition && !reducedMotion()) document.startViewTransition(fn); else fn();
+  }
+  function setTheme(t) {
+    store.set('theme', t);
+    withTransition(() => applyTheme(t));
+  }
+
+  // name, light accent, light hover, dark accent, dark hover
+  const ACCENTS = {
+    blue: ['Blau', '#2563eb', '#1d4ed8', '#5b8cff', '#7aa2ff'],
+    teal: ['Türkis', '#0d9488', '#0f766e', '#2dd4bf', '#5eead4'],
+    green: ['Grün', '#16a34a', '#15803d', '#4ade80', '#86efac'],
+    violet: ['Violett', '#7c3aed', '#6d28d9', '#a78bfa', '#c4b5fd'],
+    orange: ['Orange', '#ea580c', '#c2410c', '#fb923c', '#fdba74'],
+    pink: ['Pink', '#db2777', '#be185d', '#f472b6', '#f9a8d4'],
+  };
+  const isDark = () => {
+    const t = document.documentElement.getAttribute('data-theme');
+    return t ? t === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  };
+  function applyAccent() {
+    const name = store.get('accent', 'blue');
+    const st = document.documentElement.style;
+    const a = ACCENTS[name];
+    if (!a || name === 'blue') { ['--accent', '--accent-2', '--accent-soft'].forEach((v) => st.removeProperty(v)); return; }
+    const dark = isDark();
+    const c = dark ? a[3] : a[1];
+    st.setProperty('--accent', c);
+    st.setProperty('--accent-2', dark ? a[4] : a[2]);
+    st.setProperty('--accent-soft', `color-mix(in srgb, ${c} ${dark ? 16 : 11}%, transparent)`);
+  }
+
+
+  // ------------------------------------------------------------------- boot
+  function boot() {
+    const forced = new URLSearchParams(location.search).get('theme');
+    applyTheme(THEMES.some((x) => x[0] === forced) ? forced : store.get('theme', 'auto'));
+    $('#themeToggle').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') || 'auto';
+      const i = THEMES.findIndex((x) => x[0] === cur);
+      const next = THEMES[(i + 1) % THEMES.length][0];
+      setTheme(next);
+      $$('[data-theme-set]').forEach((b) => b.classList.toggle('active', b.dataset.themeSet === next));
+    });
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyAccent);
+    watchPageIn();
+    $('#menuBtn').innerHTML = ic('menu');
+    $('#feedbackLink').innerHTML = `${ic('message')}<span>Feedback &amp; Fehler melden</span>`;
+    $('#menuBtn').addEventListener('click', () => $('#app').classList.toggle('nav-open'));
+    $('#scrim').addEventListener('click', () => $('#app').classList.remove('nav-open'));
+    window.addEventListener('scroll', () => $('.topbar').classList.toggle('scrolled', window.scrollY > 4), { passive: true });
+    window.addEventListener('hashchange', navigate);
+    navigate();
+  }
+  boot();
+})();
