@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Sensorauswahl mit **Suche**: Name oder Entitäts-ID eintippen (mehrere Wörter möglich), mit Pfeiltasten und Enter auswählen oder die Liste aufklappen; zeigt aktuellen Wert und Einheit und markiert Sensoren ohne Langzeitstatistik. Eine Entität, die nicht in der Liste steht, kann direkt als ID eingetragen werden
+- Neues Icon und Logo für den Add-on-Store
+
 ## 0.2.0
 
 - Neu: **Eigene, lernende PV-Prognose „EnergyPilot“** – gewichtet jede Quelle je Anlage und erwarteter Wetterlage nach ihrer bisherigen Treffsicherheit und korrigiert je Uhrzeit (Verschattung, Abregelung, Verschmutzung). Wird stündlich neu gelernt, rückwirkend Tag für Tag nur aus den Vortagen – so ist der Vergleich im Prognose-Check ehrlich

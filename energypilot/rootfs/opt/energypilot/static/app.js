@@ -144,6 +144,8 @@
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     chevron: '<path d="m9 6 6 6-6 6"/>',
     chevronL: '<path d="m15 6-6 6 6 6"/>',
+    chevronDown: '<path d="m6 9 6 6 6-6"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
     trophy: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
     database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
     sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
@@ -731,10 +733,75 @@
     await fn(body, token);
   }
 
-  function entityOptions(list, value, kinds) {
-    const opts = list.filter((e) => kinds.includes(e.kind));
-    const known = opts.some((e) => e.entity_id === value);
-    return `<option value="">– kein Sensor –</option>${value && !known ? `<option value="${esc(value)}" selected>${esc(value)}</option>` : ''}${opts.map((e) => `<option value="${esc(e.entity_id)}" ${e.entity_id === value ? 'selected' : ''}>${esc(e.name)} (${esc(e.state)} ${esc(e.unit)})${e.statistics ? '' : ' – keine Statistik'}</option>`).join('')}`;
+  /* Entity picker: type to search by name or entity ID, or open the list and pick.
+     The chosen entity lives in a hidden input with the given id, so forms read
+     it with .value like a select. An entity that is not in the list can be
+     typed in directly (e.g. sensor.xyz) and confirmed with Enter. */
+  const ENTITY_RE = /^[a-z_]+\.[a-z0-9_]+$/;
+  function entityPicker(id, list, value, kinds) {
+    const cur = list.find((e) => e.entity_id === value);
+    return `<div class="ent-pick" data-kinds="${kinds.join(',')}">
+      <input type="hidden" id="${id}" value="${esc(value || '')}">
+      <div class="ent-box"><span class="ent-ico">${ic('search')}</span>
+        <input class="input ent-q" type="text" autocomplete="off" spellcheck="false" placeholder="Name oder Entität suchen …" value="${esc(cur ? cur.name : value || '')}" aria-label="Sensor suchen">
+        <button type="button" class="icon-btn ent-clear ${value ? '' : 'hidden'}" title="Auswahl entfernen">${ic('x')}</button>
+        <button type="button" class="icon-btn ent-open" title="Liste öffnen">${ic('chevronDown')}</button></div>
+      <div class="ent-id mono ${value ? '' : 'hidden'}">${esc(value || '')}</div>
+      <div class="ent-list hidden" role="listbox"></div></div>`;
+  }
+  function bindPickers(root, list) {
+    $$('.ent-pick', root).forEach((pk) => {
+      const kinds = pk.dataset.kinds.split(',');
+      const hidden = pk.querySelector('input[type=hidden]');
+      const q = pk.querySelector('.ent-q');
+      const box = pk.querySelector('.ent-list');
+      const idLine = pk.querySelector('.ent-id');
+      const clear = pk.querySelector('.ent-clear');
+      let active = 0; let shown = [];
+      const label = (v) => { const e = list.find((x) => x.entity_id === v); return e ? e.name : v; };
+      const set = (v) => {
+        hidden.value = v; q.value = v ? label(v) : '';
+        idLine.textContent = v; idLine.classList.toggle('hidden', !v); clear.classList.toggle('hidden', !v);
+        close();
+        hidden.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+      const close = () => { box.classList.add('hidden'); pk.classList.remove('open'); };
+      const draw = (term) => {
+        const words = term.toLowerCase().split(/\s+/).filter(Boolean);
+        const pool = list.filter((e) => kinds.includes(e.kind));
+        shown = pool.filter((e) => { const hay = `${e.name} ${e.entity_id}`.toLowerCase(); return words.every((w) => hay.includes(w)); }).slice(0, 60);
+        active = Math.max(0, Math.min(active, shown.length - 1));
+        const typed = term.trim();
+        const manual = ENTITY_RE.test(typed) && !list.some((e) => e.entity_id === typed);
+        box.innerHTML = (manual ? `<div class="ent-opt manual" data-v="${esc(typed)}">${ic('plus')}<span>„${esc(typed)}“ übernehmen</span></div>` : '')
+          + (shown.map((e, i) => `<div class="ent-opt ${i === active ? 'active' : ''} ${e.entity_id === hidden.value ? 'sel' : ''}" role="option" data-v="${esc(e.entity_id)}">
+              <div class="grow"><div class="n">${esc(e.name)}</div><div class="i mono">${esc(e.entity_id)}</div></div>
+              <div class="v">${esc(e.state)} ${esc(e.unit)}${e.statistics ? '' : '<br><span class="badge warn">keine Statistik</span>'}</div></div>`).join('')
+          || (manual ? '' : `<div class="ent-empty">Kein passender Sensor${pool.length ? '' : ' – Home Assistant liefert keine passenden Sensoren'}. Eine Entitäts-ID wie <span class="mono">sensor.xyz</span> kannst du direkt eintippen.</div>`));
+        box.classList.remove('hidden'); pk.classList.add('open');
+        const a = box.querySelector('.ent-opt.active'); if (a) a.scrollIntoView({ block: 'nearest' });
+      };
+      q.addEventListener('focus', () => { q.select(); draw(''); });
+      q.addEventListener('input', () => { active = 0; draw(q.value); });
+      q.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault(); if (box.classList.contains('hidden')) { draw(q.value); return; }
+          active = Math.max(0, Math.min(shown.length - 1, active + (e.key === 'ArrowDown' ? 1 : -1))); draw(q.value);
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const typed = q.value.trim();
+          if (ENTITY_RE.test(typed) && !shown.some((x) => x.entity_id === typed) && !list.some((x) => x.entity_id === typed)) set(typed);
+          else if (shown[active]) set(shown[active].entity_id);
+        } else if (e.key === 'Escape') { e.stopPropagation(); set(hidden.value); }
+      });
+      // leaving the field without choosing keeps the previous selection
+      q.addEventListener('blur', () => setTimeout(() => { if (!pk.contains(document.activeElement)) { q.value = hidden.value ? label(hidden.value) : ''; close(); } }, 150));
+      box.addEventListener('mousedown', (e) => e.preventDefault());
+      box.addEventListener('click', (e) => { const o = e.target.closest('.ent-opt'); if (o) set(o.dataset.v); });
+      clear.addEventListener('click', () => set(''));
+      pk.querySelector('.ent-open').addEventListener('mousedown', (e) => e.preventDefault());
+      pk.querySelector('.ent-open').addEventListener('click', () => { if (pk.classList.contains('open')) close(); else { q.focus(); } });
+    });
   }
   const COMPASS = [['Nord', 0], ['Nordost', 45], ['Ost', 90], ['Südost', 135], ['Süd', 180], ['Südwest', 225], ['West', 270], ['Nordwest', 315]];
   const dirName = (az) => COMPASS[Math.round((((az % 360) + 360) % 360) / 45) % 8][0];
@@ -769,7 +836,7 @@
         title: isNew ? 'PV-Anlage hinzufügen' : 'PV-Anlage bearbeiten',
         body: `<div class="form-grid">
           <div class="field span-2"><label>Name</label><input class="input" id="a_name" value="${esc(cfg.name || '')}" placeholder="z. B. Hausdach oder Garage Ost-West"></div>
-          <div class="field span-2"><label>Messsensor (Wechselrichter)</label><select class="input" id="a_sensor">${entityOptions(ents, cfg.sensor || '', ['power', 'energy'])}</select><span class="hint">Leistung (W/kW) oder Energiezähler (Wh/kWh) – er misst alle Teilflächen unten zusammen</span></div>
+          <div class="field span-2"><label>Messsensor (Wechselrichter)</label>${entityPicker('a_sensor', ents, cfg.sensor || '', ['power', 'energy'])}<span class="hint">Leistung (W/kW) oder Energiezähler (Wh/kWh) – er misst alle Teilflächen unten zusammen</span></div>
         </div>
         <div class="field"><label>Teilflächen</label>
           <div class="plane-head"><span>Leistung (kWp)</span><span>Neigung (°)</span><span>Ausrichtung</span><span></span></div>
@@ -786,6 +853,7 @@
         foot: `${isNew ? '' : `<button class="btn danger left" id="a_del">${ic('trash')}Löschen</button>`}<button class="btn" data-close>Abbrechen</button><button class="btn primary" id="a_save">${ic('check')}Speichern</button>`,
         onMount(m, close) {
           const v = (id) => m.querySelector(id);
+          bindPickers(m, ents);
           const num = (x) => Number(String(x).replace(',', '.'));
           const planes = () => $$('[data-plane]', m).map((r) => ({ kwp: num(r.querySelector('[data-k=kwp]').value), tilt: num(r.querySelector('[data-k=tilt]').value), azimuth: num(r.querySelector('[data-k=azimuth]').value) }));
           // direction list and exact degrees stay in sync; "genau …" allows any other angle
@@ -916,12 +984,12 @@
     const s = S.settings.sensors; const loc = S.settings.location; const ha = S.settings.ha_location;
     el.innerHTML = `<div class="grid cols-2">
       <div class="card"><div class="card-head"><div class="avatar accent">${ic('sliders')}</div><h2>Sensoren</h2></div><div class="card-body">
-        <div class="field"><label>Hausverbrauch</label><select class="input" id="n_house">${entityOptions(ents, s.house, ['power', 'energy'])}</select><span class="hint">Gesamtverbrauch des Hauses (inklusive E-Auto und Heizstab) – Grundlage der Verbrauchsprognose</span></div>
-        <div class="field"><label>Netzleistung</label><select class="input" id="n_grid">${entityOptions(ents, s.grid, ['power'])}</select><span class="hint">Vom Smartmeter: positiv = Bezug, negativ = Einspeisung</span></div>
-        <div class="field"><label>Batterie Ladezustand</label><select class="input" id="n_soc">${entityOptions(ents, s.battery_soc, ['percent'])}</select></div>
-        <div class="field"><label>Batterie Leistung</label><select class="input" id="n_bp">${entityOptions(ents, s.battery_power, ['power'])}</select><span class="hint">positiv = Laden, negativ = Entladen</span></div>
-        <div class="field"><label>E-Auto / Wallbox</label><select class="input" id="n_ev">${entityOptions(ents, s.ev || '', ['power', 'energy'])}</select><span class="hint">Ladeleistung oder Ladezähler, z. B. aus evcc</span></div>
-        <div class="field"><label>Heizstab</label><select class="input" id="n_heater">${entityOptions(ents, s.heater || '', ['power', 'energy'])}</select><span class="hint">E-Auto und Heizstab werden vom Hausverbrauch abgezogen – die Verbrauchsprognose lernt nur den Grundverbrauch, die beiden plant EnergyPilot später gezielt.</span></div>
+        <div class="field"><label>Hausverbrauch</label>${entityPicker('n_house', ents, s.house, ['power', 'energy'])}<span class="hint">Gesamtverbrauch des Hauses (inklusive E-Auto und Heizstab) – Grundlage der Verbrauchsprognose</span></div>
+        <div class="field"><label>Netzleistung</label>${entityPicker('n_grid', ents, s.grid, ['power'])}<span class="hint">Vom Smartmeter: positiv = Bezug, negativ = Einspeisung</span></div>
+        <div class="field"><label>Batterie Ladezustand</label>${entityPicker('n_soc', ents, s.battery_soc, ['percent'])}</div>
+        <div class="field"><label>Batterie Leistung</label>${entityPicker('n_bp', ents, s.battery_power, ['power'])}<span class="hint">positiv = Laden, negativ = Entladen</span></div>
+        <div class="field"><label>E-Auto / Wallbox</label>${entityPicker('n_ev', ents, s.ev || '', ['power', 'energy'])}<span class="hint">Ladeleistung oder Ladezähler, z. B. aus evcc</span></div>
+        <div class="field"><label>Heizstab</label>${entityPicker('n_heater', ents, s.heater || '', ['power', 'energy'])}<span class="hint">E-Auto und Heizstab werden vom Hausverbrauch abgezogen – die Verbrauchsprognose lernt nur den Grundverbrauch, die beiden plant EnergyPilot später gezielt.</span></div>
       </div></div>
       <div class="card"><div class="card-head"><div class="avatar accent">${ic('compass')}</div><h2>Standort</h2></div><div class="card-body">
         <p class="explain">Standardmäßig wird der Standort aus Home Assistant verwendet${ha ? ` (${nf(ha[0], 3)}, ${nf(ha[1], 3)})` : ''}. Nur ausfüllen, wenn die Anlage woanders steht.</p>
@@ -930,6 +998,7 @@
         <span class="hint faint" style="font-size:12px">Eine Änderung verwirft die gespeicherten Wetterdaten und lädt sie für den neuen Ort neu.</span>
       </div></div></div>
       <div class="row" style="margin-top:16px"><button class="btn primary" id="n_save">${ic('check')}Speichern</button></div>`;
+    bindPickers(el, ents);
     $('#n_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({
       sensors: { house: $('#n_house').value, grid: $('#n_grid').value, battery_soc: $('#n_soc').value, battery_power: $('#n_bp').value, ev: $('#n_ev').value, heater: $('#n_heater').value },
       location: { latitude: $('#n_lat').value, longitude: $('#n_lon').value },
