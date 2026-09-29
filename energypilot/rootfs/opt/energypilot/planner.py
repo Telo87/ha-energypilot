@@ -95,6 +95,36 @@ def _flows(mode: str, soc: float, target: float | None, h: Hour, b: Battery, fee
     return soc_end, imp, exp, imp * h.price - exp * feed_in, grid_charge
 
 
+def end_price(hours: list[Hour], b: Battery) -> float:
+    """Value (ct/kWh) of energy left in the battery at the end: what it saves later,
+    conservatively the lower-middle price of the period."""
+    prices = sorted(h.price for h in hours)
+    return max(0.0, prices[len(prices) // 3]) * b.eta if prices else 0.0
+
+
+def simulate(
+    hours: list[Hour], soc_kwh: float, b: Battery, feed_in: float,
+    modes: list[str] | None = None, targets: list[float | None] | None = None, end_value: float | None = None,
+) -> Plan:
+    """Run given modes (default: normal) over the hours – e.g. yesterday's recommendations on real data."""
+    lo = b.capacity_kwh * b.min_soc / 100
+    hi = b.capacity_kwh
+    ev = end_price(hours, b) if end_value is None else end_value
+    plan = Plan(end_value=ev)
+    soc = max(0.0, min(hi, soc_kwh))
+    for i, h in enumerate(hours):
+        mode = modes[i] if modes else "normal"
+        target = targets[i] if targets and mode == "charge" else None
+        if mode == "charge" and target is None:
+            target = b.capacity_kwh * b.max_soc_grid / 100
+        soc_end, imp, exp, cost, _g = _flows(mode, soc, target, h, b, feed_in, lo, hi)
+        plan.steps.append(Step(h.start, mode, soc, soc_end, imp, exp, cost))
+        plan.cost += cost
+        soc = soc_end
+    plan.cost -= max(0.0, soc - lo) * ev
+    return plan
+
+
 def optimize(hours: list[Hour], soc_kwh: float, b: Battery, feed_in: float) -> Plan:
     if not hours:
         return Plan()
@@ -104,9 +134,7 @@ def optimize(hours: list[Hour], soc_kwh: float, b: Battery, feed_in: float) -> P
     n = round(hi / STEP_KWH) + 1
     idx = lambda kwh: max(0, min(n - 1, round(kwh / STEP_KWH)))
     soc_kwh = max(0.0, min(hi, soc_kwh))
-    prices = sorted(h.price for h in hours)
-    # energy left at the end: worth what it saves later, conservatively the lower-middle price
-    end_value = max(0.0, prices[len(prices) // 3]) * b.eta
+    end_value = end_price(hours, b)
     T = len(hours)
     INF = float("inf")
     # value[t][i]: minimal cost from hour t with stored energy i*STEP to the end

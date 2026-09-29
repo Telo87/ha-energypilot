@@ -91,3 +91,34 @@ def test_live_values_respect_invert(tmp_path):
     asyncio.run(hub.read_live())
     assert hub.live["values"]["battery_power"]["value"] == 740  # sign flipped (-0.74 kW -> +740 W)
     assert hub.live["values"]["grid"]["value"] == -740  # not inverted
+
+
+def test_simulate_normal_equals_baseline():
+    from energypilot.planner import simulate
+
+    hours = day([15.0] * 4 + [50.0] * 6)
+    plan = optimize(hours, 1.1, Battery(), feed_in=8)
+    assert simulate(hours, 1.1, Battery(), 8).cost == pytest.approx(plan.cost_baseline)
+    replay = simulate(hours, 1.1, Battery(), 8, [s.mode for s in plan.steps], [s.soc_end for s in plan.steps])
+    assert replay.cost == pytest.approx(plan.cost, abs=1.0)
+
+
+def test_journal_scores_recommendations(tmp_path):
+    import time as _time
+
+    settings = Settings(tmp_path / "s.json")
+    arr = settings.upsert_array({"name": "Dach", "planes": [{"kwp": 5}], "sensor": "sensor.pv"})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    start = hub.midnight(int(_time.time())) - 86400  # yesterday
+    prices = [15.0] * 4 + [50.0] * 6
+    for i, price in enumerate(prices):
+        t = start + i * 3600
+        mode = "charge" if i == 3 else "normal"
+        hub.db.log_plan((t, mode, price, 0.0, 0.6, 10.0, 40.0 if i == 3 else 10.0, 10.0, t))
+        hub.db.put_actual([(arr["id"], t, 0.0), ("base", t, 600.0)])
+        hub.db.put_prices([(t + q * 900, 900, (price / 1.19) * 10) for q in range(4)])  # end price = spot/10 * 1.19
+    j = hub.journal(days=3)
+    yesterday = next(d for d in j["days"] if d["complete_hours"])
+    assert yesterday["charge_hours"] == 1
+    assert yesterday["saved"] > 0  # charging at 15 ct for the 50 ct hours pays off
+    assert yesterday["possible"] >= yesterday["saved"] - 0.01

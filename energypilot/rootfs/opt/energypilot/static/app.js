@@ -151,6 +151,7 @@
     sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
     palette: '<path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11.5" r="1"/><circle cx="10.5" cy="7.5" r="1"/><circle cx="15" cy="7.5" r="1"/>',
     compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
+    journal: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/>',
   };
   const ic = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[name] || ''}</svg>`;
 
@@ -284,7 +285,7 @@
         if (v == null) { pen = false; return; }
         d += `${pen ? 'L' : 'M'}${(x(i) + cw / 2).toFixed(1)},${y(v).toFixed(1)}`; pen = true;
       });
-      if (d) lines += `<path class="ln" pathLength="1" d="${d}" fill="none" stroke="${l.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"${l.dash ? ' stroke-dasharray="5 4"' : ''}/>`;
+      if (d) lines += `<path class="ln${l.dash ? ' dash' : ''}" ${l.dash ? '' : 'pathLength="1" '}d="${d}" fill="none" stroke="${l.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
     });
     let nowMark = '';
     if (c.now && c.now >= c.xs[0] && c.now < c.xs[n - 1] + c.step) {
@@ -357,6 +358,7 @@
   const PAGES = [
     { id: 'dashboard', title: 'Übersicht', icon: 'grid', section: 'Energie' },
     { id: 'plan', title: 'Planung', icon: 'battery' },
+    { id: 'journal', title: 'Protokoll', icon: 'journal' },
     { id: 'accuracy', title: 'Prognose-Check', icon: 'target' },
     { id: 'day', title: 'Tagesverlauf', icon: 'chart' },
     { id: 'prices', title: 'Strompreise', icon: 'euro' },
@@ -610,6 +612,63 @@
     await load();
     const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 60000);
     S.cleanup.push(() => clearInterval(timer));
+  }
+
+  // ---------------------------------------------------------------- journal
+  const eur = (v) => (v == null ? '–' : `${v < 0 ? '−' : ''}${nf(Math.abs(v), 2)} €`);
+  async function renderJournal(el, token) {
+    const days = store.get('journalDays', 14);
+    const d = await api(`journal?days=${days}`);
+    if (stale(token)) return;
+    const t = d.totals;
+    setHeader('Protokoll', d.since ? `Empfehlungen seit ${new Date(d.since * 1000).toLocaleDateString('de-DE')} · ${t.hours} Stunden mit vollständigen Messwerten ausgewertet` : '');
+    if (!d.days.length) {
+      el.innerHTML = `<div class="card"><div class="card-body">${empty('journal', 'Das Protokoll füllt sich ab jetzt', 'Jede Stunde wird festgehalten, was EnergyPilot empfohlen hat – mit Preis, Prognosen und geplantem Ladezustand. Sobald die Messwerte der Stunde da sind, rechnet EnergyPilot nach, was das Befolgen der Empfehlungen wirklich gebracht hätte. Voraussetzung ist ein Plan (Sensor für den Batterie-Ladezustand).')}</div></div>`;
+      return;
+    }
+    const share = t.possible > 0.005 ? Math.max(0, Math.min(100, (t.saved / t.possible) * 100)) : null;
+    const kpi = (icon, cls, label, value, foot) => `<div class="card kpi"><div class="kpi-label"><span class="kpi-icon ${cls}">${ic(icon)}</span>${label}</div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`;
+    const withCost = d.days.filter((x) => x.cost_base != null).slice().reverse();
+    el.innerHTML = `<div class="toolbar"><div class="seg" id="jDays">${[[7, '7 Tage'], [14, '14 Tage'], [30, '30 Tage'], [90, '90 Tage']].map(([v, l]) => `<button data-v="${v}" class="${days === v ? 'active' : ''}">${l}</button>`).join('')}</div></div>
+      <div class="grid kpis">
+        ${kpi('euro', t.saved >= 0 ? 'ok' : 'err', 'Mit Plan gespart', `${cnt('js', nf(t.saved, 2))}<small>€</small>`, 'wenn alle Empfehlungen befolgt worden wären')}
+        ${kpi('trophy', 'up', 'Im Nachhinein möglich', `${cnt('jp', nf(t.possible, 2))}<small>€</small>`, 'mit perfektem Wissen über Sonne und Verbrauch')}
+        ${kpi('target', share != null && share >= 60 ? 'ok' : 'warn', 'Davon erreicht', share == null ? '–' : `${cnt('jq', nf(share, 0))}<small>%</small>`, share == null ? 'bisher keine Ersparnis möglich' : 'Anteil der möglichen Ersparnis')}
+        ${kpi('home', '', 'Stromkosten ohne Plan', `${cnt('jc', nf(t.cost_base, 2))}<small>€</small>`, 'so wie der Akku tatsächlich lief; negativ = Einnahmen überwiegen')}
+      </div>
+      <div class="notice info" style="margin-top:16px">${ic('info')}<div>Für jeden Tag rechnet EnergyPilot drei Stromrechnungen aus den <b>echten</b> Messwerten und Preisen: <b>ohne Plan</b> (Akku im Eigenverbrauch, wie er tatsächlich lief), <b>mit Plan</b> (die Empfehlungen, die zur jeweiligen Stunde aus den Prognosen entstanden, wären befolgt worden) und <b>optimal</b> (im Nachhinein bestmöglich). Liegt „mit Plan“ dauerhaft nahe an „optimal“, sind Prognosen und Planung verlässlich genug für die Steuerung. Grundlage ist der Grundverbrauch – E-Auto und Heizstab sind nicht enthalten.</div></div>
+      <div class="card" style="margin-top:16px"><div class="card-head"><h2>Ersparnis pro Tag</h2></div><div class="card-body">
+        <div class="legend"><span class="static"><i class="box" style="background:var(--ok)"></i>Mit Plan gespart</span><span class="static"><i style="background:var(--text-2)"></i>Im Nachhinein möglich</span></div>
+        <div class="chart" id="jChart"></div></div></div>
+      <div class="card"><div class="card-head"><h2>Tage <span class="sub">Klick zeigt die einzelnen Stunden</span></h2></div><div class="card-body flush"><div class="table-wrap"><table class="table compact">
+        <thead><tr><th>Tag</th><th>Empfehlungen</th><th class="num">PV kWh<br><span class="faint">Prognose → Ist</span></th><th class="num">Verbrauch kWh<br><span class="faint">Prognose → Ist</span></th><th class="num">ohne Plan</th><th class="num">mit Plan</th><th class="num">optimal</th><th class="num">gespart</th></tr></thead><tbody>
+        ${d.days.map((x, i) => `<tr class="click" data-i="${i}"><td class="nowrap">${fmtDay(dayTs(x.day))}${x.complete_hours < x.hours ? ` <span class="faint" title="Stunden mit vollständigen Messwerten">(${x.complete_hours}/${x.hours} h)</span>` : ''}</td>
+          <td>${x.charge_hours ? `<span class="badge accent">${ic('plug')}${x.charge_hours} h laden</span> ` : ''}${x.hold_hours ? `<span class="badge warn">${ic('battery')}${x.hold_hours} h halten</span>` : ''}${!x.charge_hours && !x.hold_hours ? '<span class="faint nowrap">nur Eigenverbrauch</span>' : ''}</td>
+          <td class="num">${nf(x.pv_fc, 1)} → ${x.pv == null ? '–' : nf(x.pv, 1)}</td><td class="num">${nf(x.load_fc, 1)} → ${x.load == null ? '–' : nf(x.load, 1)}</td>
+          <td class="num">${eur(x.cost_base)}</td><td class="num">${eur(x.cost_plan)}</td><td class="num">${eur(x.cost_best)}</td>
+          <td class="num ${x.saved > 0.005 ? 'best' : x.saved < -0.005 ? 'pos' : ''}">${x.saved == null ? '–' : eur(x.saved)}</td></tr>`).join('')}
+        </tbody></table></div></div></div>`;
+    chart($('#jChart'), {
+      xs: withCost.map((x) => dayTs(x.day)), step: 86400, height: 200, tickCenter: true,
+      bar: { label: 'Mit Plan gespart', color: 'var(--ok)', cls: 'bar-save', values: withCost.map((x) => x.saved), clsFor: (i, v) => (v < 0 ? 'neg' : '') },
+      lines: [{ key: 'possible', label: 'Im Nachhinein möglich', color: 'var(--text-2)', dash: true, values: withCost.map((x) => x.possible) }],
+      fmt: (v) => eur(v), axisFmt: (v) => `${nf(v, 2)} €`, head: (ts) => fmtDay(ts), tick: (ts) => new Date(ts * 1000).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }),
+      emptyText: 'Noch keine vollständig ausgewerteten Tage.',
+    });
+    $$('#jDays button').forEach((b) => b.addEventListener('click', () => { store.set('journalDays', Number(b.dataset.v)); navigate(); }));
+    $$('tr.click[data-i]').forEach((tr) => tr.addEventListener('click', () => journalDay(d.days[Number(tr.dataset.i)])));
+  }
+  function journalDay(x) {
+    const diff = (fc, act) => (act == null ? '' : ` <span class="faint">(${signed((fc - act), 2)})</span>`);
+    modal({
+      title: `Protokoll – ${fmtDate(dayTs(x.day))}`, wide: true,
+      body: `<div class="table-wrap"><table class="table compact"><thead><tr><th>Stunde</th><th>Empfehlung</th><th class="num">ct/kWh</th><th class="num">PV kWh<br><span class="faint">Prognose (Abw.)</span></th><th class="num">Verbrauch kWh<br><span class="faint">Prognose (Abw.)</span></th><th class="num">Akku % am Stundenende<br><span class="faint">geplant / Ist</span></th></tr></thead><tbody>
+        ${x.detail.map((h) => `<tr${h.complete ? '' : ' class="offline"'}><td class="nowrap">${fmtHour(h.ts)}–${fmtHour(h.ts + 3600)}</td><td><span class="badge ${MODE[h.mode][2]}">${ic(MODE[h.mode][1])}${MODE[h.mode][0]}</span></td>
+          <td class="num">${nf(h.price, 1)}</td><td class="num">${nf(h.pv_fc, 2)}${diff(h.pv_fc, h.pv)}</td><td class="num">${nf(h.load_fc, 2)}${diff(h.load_fc, h.load)}</td>
+          <td class="num">${nf(h.soc_plan, 0)} / ${h.soc_actual == null ? '–' : nf(h.soc_actual, 0)}</td></tr>`).join('')}
+        </tbody></table></div>
+        <p class="faint" style="font-size:12.5px;margin:10px 0 0">Abw. = Prognose minus Messwert (+ = zu hoch vorhergesagt). Akku: geplanter und gemessener Ladezustand am Ende der Stunde. Solange EnergyPilot nicht steuert, läuft der Akku im Eigenverbrauch – bei „laden“ und „halten“ zeigt der geplante Wert, wohin der Plan ihn gebracht hätte.</p>`,
+    });
   }
 
   // How the own forecast currently combines the sources (per array)
@@ -1187,7 +1246,7 @@
     draw();
   }
 
-  const RENDER = { dashboard: renderDashboard, plan: renderPlan, accuracy: renderAccuracy, day: renderDay, prices: renderPrices, settings: renderSettings };
+  const RENDER = { dashboard: renderDashboard, plan: renderPlan, journal: renderJournal, accuracy: renderAccuracy, day: renderDay, prices: renderPrices, settings: renderSettings };
   // -------------------------------------------------------------- UI pieces
   function toast(msg, type = 'ok') {
     const el = document.createElement('div');

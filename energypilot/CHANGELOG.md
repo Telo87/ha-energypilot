@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3
+
+- Neu: **Protokoll** – jede Stunde wird die Empfehlung festgehalten (Modus, Preis, PV- und Verbrauchsprognose, geplanter Ladezustand, gemessener Ladezustand). Sobald die Messwerte da sind, rechnet EnergyPilot für jeden Tag drei Stromrechnungen aus den echten Werten: **ohne Plan** (Akku im Eigenverbrauch), **mit Plan** (Empfehlungen befolgt) und **optimal** (im Nachhinein bestmöglich)
+- Übersicht mit Ersparnis, möglicher Ersparnis und erreichtem Anteil; Tagestabelle mit Prognose gegen Messwert; Stundendetails per Klick
+- Grundlage, um zu entscheiden, ab wann EnergyPilot den Akku selbst steuern darf
+- Gestrichelte Linien in Diagrammen werden jetzt korrekt gestrichelt dargestellt
+
 ## 0.3.2
 
 - Neu: **Richtung umkehren** für Hausverbrauch, Netzleistung und Batterie-Leistung (Einstellungen › Sensoren) – z. B. für die sonnenBatterie, die Entladen positiv meldet. Darunter steht sofort, wie EnergyPilot den aktuellen Wert versteht („Batterie entlädt mit 737 W“)

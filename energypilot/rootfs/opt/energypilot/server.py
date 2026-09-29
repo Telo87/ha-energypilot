@@ -129,6 +129,15 @@ async def consumption_check(request: web.Request) -> web.Response:
     return _ok(await asyncio.to_thread(_hub(request).consumption_check))
 
 
+@routes.get("/api/journal")
+async def journal(request: web.Request) -> web.Response:
+    try:
+        days = max(1, min(90, int(request.query.get("days", 14))))
+    except ValueError:
+        days = 14
+    return _ok(await asyncio.to_thread(_hub(request).journal, days))
+
+
 @routes.get("/api/plan")
 async def plan(request: web.Request) -> web.Response:
     hub = _hub(request)

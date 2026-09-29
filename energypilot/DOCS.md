@@ -114,6 +114,23 @@ EnergyPilot **steuert noch nichts**. Die Empfehlung steht als Sensoren für eige
 | `binary_sensor.energypilot_entladesperre` | an, wenn der Akku jetzt nicht entladen werden soll |
 | `sensor.energypilot_akku_reichweite` | Stunden beim aktuellen Verbrauch; Attribute `empty_at`, `full_at` |
 
+## Protokoll
+
+Jede Stunde hält EnergyPilot fest, was es zu Beginn der Stunde empfohlen hat – mit Preis, PV- und
+Verbrauchsprognose sowie geplantem und gemessenem Ladezustand. Sobald die Messwerte der Stunde da sind,
+rechnet es für jeden Tag drei Stromrechnungen aus den **echten** Werten:
+
+| Rechnung | Bedeutung |
+|---|---|
+| ohne Plan | Akku im Eigenverbrauch – so, wie er tatsächlich lief |
+| mit Plan | die Empfehlungen, die aus den Prognosen entstanden, wären befolgt worden |
+| optimal | im Nachhinein bestmöglicher Fahrplan mit perfektem Wissen |
+
+„Mit Plan gespart“ kann auch negativ sein, wenn Prognosen danebenlagen. Liegt der Wert über einige Tage
+nahe an „optimal“ (Anteil „davon erreicht“ hoch), sind Prognosen und Planung verlässlich genug, um
+EnergyPilot die Steuerung zu überlassen. Grundlage ist der Grundverbrauch; E-Auto und Heizstab sind nicht
+enthalten.
+
 ## Prognose-Check
 
 | Kennzahl | Bedeutung |

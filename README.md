@@ -1,6 +1,6 @@
 # EnergyPilot – Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-0.3.2-blue)
+![Version](https://img.shields.io/badge/version-0.3.3-blue)
 
 Welche PV-Prognose stimmt bei **deinem** Dach? EnergyPilot sammelt stündlich die Prognosen mehrerer
 Wetterdienste, vergleicht sie mit der tatsächlichen Erzeugung jeder Anlage und zeigt dynamische
@@ -17,6 +17,7 @@ Batterie, E-Auto und Heizstab.
 - **Eigene, lernende PV-Prognose:** gewichtet die Quellen nach ihrer Treffsicherheit bei deinen Anlagen und lernt Verschattung und Abregelung – und muss sich im Prognose-Check gegen die Wetterdienste behaupten
 - **Verbrauchsprognose** für den Grundverbrauch (ohne E-Auto und Heizstab) nach Uhrzeit, Wochentag und Temperatur
 - **Planung:** günstigster Fahrplan für den Akku bis morgen Abend – Eigenverbrauch, Akku halten oder aus dem Netz laden – mit Begründung und Ersparnis; Akku-Reichweite beim aktuellen Verbrauch und laut Prognose
+- **Protokoll:** jede Empfehlung wird festgehalten und nachgerechnet – was hätte das Befolgen mit den echten Messwerten gespart, was wäre im Nachhinein möglich gewesen
 - **Sensoren** für Automationen: Empfehlung, Netzladen/Entladesperre, Akku-Reichweite, Strompreis, PV- und Verbrauchsprognose, genaueste Quelle
 
 ## Geplant

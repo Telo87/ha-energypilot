@@ -47,6 +47,17 @@ CREATE TABLE IF NOT EXISTS price (
     dur INTEGER NOT NULL,
     spot REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS plan_log (
+    ts INTEGER PRIMARY KEY,  -- start of the hour
+    mode TEXT NOT NULL,  -- recommendation at the start of the hour
+    price REAL,  -- ct/kWh
+    pv REAL,  -- forecast kWh for the full hour
+    load REAL,
+    soc_plan_start REAL,  -- %
+    soc_plan_end REAL,
+    soc_actual REAL,  -- % measured when the recommendation was made
+    logged INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -182,6 +193,18 @@ class Database:
 
     def last_price_ts(self) -> int | None:
         return self._read("SELECT MAX(ts) FROM price")[0][0]
+
+    # ---------------------------------------------------------------- plan log
+    def log_plan(self, row: tuple) -> bool:
+        """First recommendation of an hour; later recalculations do not overwrite it."""
+        return self._write("INSERT OR IGNORE INTO plan_log VALUES (?,?,?,?,?,?,?,?,?)", [row]) > 0
+
+    def plan_log(self, start: int, end: int) -> list[tuple]:
+        return self._read(
+            "SELECT ts, mode, price, pv, load, soc_plan_start, soc_plan_end, soc_actual, logged "
+            "FROM plan_log WHERE ts>=? AND ts<? ORDER BY ts",
+            (start, end),
+        )
 
     # -------------------------------------------------------------------- meta
     def get_meta(self, key: str, default: str | None = None) -> str | None:

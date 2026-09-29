@@ -686,15 +686,116 @@ class Hub:
             "baseline_eur": round(plan.cost_baseline / 100, 2),
             "savings_eur": round(plan.savings / 100, 2),
             "horizon_end": steps[-1]["ts"] + 3600,
+            "first_fraction": hours[0].fraction,
         }
 
     async def update_plan(self) -> None:
         try:
             self.plan = await asyncio.to_thread(self.compute_plan)
+            self.log_plan()
         except Exception as err:
             _LOGGER.exception("Planning failed")
             self.plan = {"ok": False, "reason": f"Planung fehlgeschlagen: {err}"}
         self._plan_at = time.time()
+
+    def log_plan(self) -> None:
+        """Remember the recommendation made at the start of each hour (for the journal)."""
+        p = self.plan
+        if not p.get("ok"):
+            return
+        st = p["steps"][0]
+        frac = max(0.05, p.get("first_fraction") or 1.0)
+        self.db.log_plan((
+            st["ts"], st["mode"], st["price"], round(st["pv"] / frac, 3), round(st["load"] / frac, 3),
+            st["soc_start"], st["soc_end"], p["soc"], int(time.time()),
+        ))
+
+    def journal(self, days: int = 14) -> dict:
+        """Recommendations of the past days checked against what really happened.
+
+        Three bills from the real PV production, base load and prices:
+        without plan (battery on its own – what actually happened), with the
+        recommendations followed, and the best possible plan in hindsight."""
+        now = int(time.time())
+        end = now // 3600 * 3600  # complete hours only
+        start = self.midnight(now) - (days - 1) * 86400
+        logs = {r[0]: r for r in self.db.plan_log(start, end)}
+        ids = [c["id"] for c in self.settings.arrays if c["kwp"] > 0 and c.get("sensor")]
+        pv: dict[int, float] = defaultdict(float)
+        pv_n: dict[int, int] = defaultdict(int)
+        load: dict[int, float] = {}
+        for series, t, wh in self.db.actuals(start, end):
+            if series in ids:
+                pv[t] += max(0.0, wh)
+                pv_n[t] += 1
+            elif series == learn.BASE_SERIES:
+                load[t] = wh
+        price_h: dict[int, list[float]] = defaultdict(list)
+        for slot in self.price_slots(start, end):
+            price_h[slot["ts"] // 3600 * 3600].append(slot["price"])
+        b = self.battery()
+        feed_in = float(self.settings.data["tariff"].get("feed_in_ct", 0))
+        cap = b.capacity_kwh
+        per_day: dict[str, list[int]] = defaultdict(list)
+        for t in sorted(logs):
+            per_day[self.day_key(t)].append(t)
+        out_days = []
+        totals = {"base": 0.0, "plan": 0.0, "best": 0.0, "hours": 0}
+        for day, ts_list in sorted(per_day.items(), reverse=True):
+            usable = [t for t in ts_list if pv_n.get(t) == len(ids) and t in load and t in price_h]
+            hours_detail = []
+            for t in ts_list:
+                r = logs[t]
+                ok = t in usable
+                hours_detail.append({
+                    "ts": t, "mode": r[1], "price": r[2], "pv_fc": r[3], "load_fc": r[4],
+                    "soc_plan": r[6],  # planned at the end of the hour
+                    # measured at the end of the hour = start of the next logged hour
+                    "soc_actual": logs[t + 3600][7] if t + 3600 in logs else None,
+                    "pv": round(pv[t] / 1000, 3) if pv_n.get(t) == len(ids) else None,
+                    "load": round(load[t] / 1000, 3) if t in load else None,
+                    "complete": ok,
+                })
+            entry = {
+                "day": day, "hours": len(ts_list), "complete_hours": len(usable),
+                "charge_hours": sum(1 for t in ts_list if logs[t][1] == "charge"),
+                "hold_hours": sum(1 for t in ts_list if logs[t][1] == "hold"),
+                "pv_fc": round(sum(logs[t][3] or 0 for t in ts_list), 2),
+                "pv": round(sum(pv[t] for t in usable) / 1000, 2) if usable else None,
+                "load_fc": round(sum(logs[t][4] or 0 for t in ts_list), 2),
+                "load": round(sum(load[t] for t in usable) / 1000, 2) if usable else None,
+                "detail": hours_detail,
+            }
+            if usable:
+                hrs = [planner.Hour(t, pv[t] / 1000, max(0.0, load[t]) / 1000, sum(price_h[t]) / len(price_h[t])) for t in usable]
+                soc0 = cap * float(logs[usable[0]][7] or 0) / 100
+                ev = planner.end_price(hrs, b)
+                base = planner.simulate(hrs, soc0, b, feed_in, end_value=ev)
+                modes = [logs[t][1] for t in usable]
+                targets = [cap * float(logs[t][6] or 0) / 100 for t in usable]
+                followed = planner.simulate(hrs, soc0, b, feed_in, modes, targets, end_value=ev)
+                best = planner.optimize(hrs, soc0, b, feed_in)
+                entry.update(
+                    cost_base=round(base.cost / 100, 2), cost_plan=round(followed.cost / 100, 2),
+                    cost_best=round(best.cost / 100, 2),
+                    saved=round((base.cost - followed.cost) / 100, 2), possible=round((base.cost - best.cost) / 100, 2),
+                )
+                totals["base"] += base.cost
+                totals["plan"] += followed.cost
+                totals["best"] += best.cost
+                totals["hours"] += len(usable)
+            out_days.append(entry)
+        return {
+            "days": out_days,
+            "since": min(logs) if logs else None,
+            "totals": {
+                "hours": totals["hours"],
+                "saved": round((totals["base"] - totals["plan"]) / 100, 2),
+                "possible": round((totals["base"] - totals["best"]) / 100, 2),
+                "cost_base": round(totals["base"] / 100, 2),
+            },
+            "battery": self.settings.data["battery"],
+        }
 
     async def publish_plan(self) -> None:
         if not self.options.publish_sensors or not self.ha.available or self.options.demo:

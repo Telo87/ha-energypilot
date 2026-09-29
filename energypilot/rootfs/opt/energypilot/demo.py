@@ -104,7 +104,8 @@ def populate(hub) -> None:
     for q in range((end - start) // 900):
         t = start + q * 900
         h = ((t + 3600) % 86400) / 3600
-        base = 95 + 45 * math.cos((h - 19) / 24 * 2 * math.pi) - 70 * math.exp(-((h - 13) ** 2) / 8)
+        base = (95 + 45 * math.cos((h - 19) / 24 * 2 * math.pi) - 70 * math.exp(-((h - 13) ** 2) / 8)
+                - 80 * math.exp(-((h - 3) ** 2) / 3) + 70 * math.exp(-((h - 7.5) ** 2) / 2))
         prices.append((t, 900, round(base + rnd.gauss(0, 8), 2)))
     db.put_prices([p for p in prices if p[0] < today + 86400 + (86400 if time.localtime().tm_hour >= 13 else 0)])
     hub._demo = {"cloud": cloud, "start": start, "arrays": arrays}
@@ -113,6 +114,49 @@ def populate(hub) -> None:
     hub.mark("ha", True, "Demo")
     hub.mark("actual", True, count=len(actual))
     hub.learn()
+    _journal(hub)
+
+
+def _journal(hub, days: int = 10) -> None:
+    """Plan log of the past days: what would have been recommended, battery on its own in reality."""
+    from . import planner
+
+    b = hub.battery()
+    cap = b.capacity_kwh
+    feed_in = float(hub.settings.data["tariff"].get("feed_in_ct", 0))
+    ids = [c["id"] for c in hub.settings.arrays if c["kwp"] > 0]
+    today = hub.midnight(int(time.time()))
+    start = today - days * 86400
+    pv_fc: dict[int, float] = {}
+    load_fc: dict[int, float] = {}
+    for source, arr, t, wh in hub.db.forecasts(start, today, "d1"):
+        if source == "ep" and arr in ids:
+            pv_fc[t] = pv_fc.get(t, 0.0) + wh
+        elif source == "ep" and arr == "base":
+            load_fc[t] = wh
+    pv, load = {}, {}
+    for series, t, wh in hub.db.actuals(start, today):
+        if series in ids:
+            pv[t] = pv.get(t, 0.0) + wh
+        elif series == "base":
+            load[t] = wh
+    price: dict[int, list[float]] = {}
+    for slot in hub.price_slots(start, today):
+        price.setdefault(slot["ts"] // 3600 * 3600, []).append(slot["price"])
+    soc = cap * 0.5
+    for d in range(days):
+        hours = [t for t in range(start + d * 86400, start + (d + 1) * 86400, 3600)
+                 if t in pv_fc and t in load_fc and t in pv and t in load and t in price]
+        if not hours:
+            continue
+        p = {t: sum(price[t]) / len(price[t]) for t in hours}
+        plan = planner.optimize([planner.Hour(t, pv_fc[t] / 1000, load_fc[t] / 1000, p[t]) for t in hours], soc, b, feed_in)
+        real = planner.simulate([planner.Hour(t, pv[t] / 1000, load[t] / 1000, p[t]) for t in hours], soc, b, feed_in)
+        for t, st, rs in zip(hours, plan.steps, real.steps, strict=True):
+            hub.db.log_plan((t, st.mode, round(p[t], 2), round(pv_fc[t] / 1000, 3), round(load_fc[t] / 1000, 3),
+                             round(st.soc_start / cap * 100, 1), round(st.soc_end / cap * 100, 1),
+                             round(rs.soc_start / cap * 100, 1), int(time.time())))
+        soc = real.steps[-1].soc_end
 
 
 async def live_loop(hub) -> None:
