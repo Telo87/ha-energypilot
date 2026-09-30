@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from .solar import Array, clearsky_hour
 
 TOTAL = "_total"
+BANDS = ("ep:lo", "ep:hi")  # see learn.BAND_LO / BAND_HI
 # day classes by clear-sky index (measured / ideal clear day)
 CLASSES = (("sunny", 0.6), ("mixed", 0.3), ("cloudy", 0.0))
 
@@ -54,7 +55,7 @@ class Dataset:
                 self.act[series][t] = max(0.0, wh)
         self.fc: dict[str, dict[str, dict[int, float]]] = defaultdict(lambda: defaultdict(dict))
         for source, arr, t, wh in forecasts:
-            if arr in array_ids:
+            if arr in array_ids and source not in BANDS:  # the uncertainty band is not a source
                 self.fc[source][arr][t] = wh
         # totals over all arrays – only hours where every array has a value
         if len(array_ids) > 1:
@@ -194,6 +195,7 @@ def daily_series(ds: Dataset, series: str) -> dict:
 
 
 def best_source(results: list[dict], min_days: int = 5) -> str | None:
-    ranked = [r for r in results if r["days"] >= min_days and r.get("day_nmae_pct") is not None]
-    ranked.sort(key=lambda r: r["day_nmae_pct"])
+    """Most accurate source – by the hourly error, like the ranking: the planner works hour by hour."""
+    ranked = [r for r in results if r["days"] >= min_days and r.get("nmae_pct") is not None]
+    ranked.sort(key=lambda r: r["nmae_pct"])
     return ranked[0]["source"] if ranked else None

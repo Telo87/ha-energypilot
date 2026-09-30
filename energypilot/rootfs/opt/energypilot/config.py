@@ -94,11 +94,13 @@ DEFAULT_SETTINGS: dict = {
         "max_discharge_kw": 3.3,
         "efficiency": 0.92,  # round trip
         "grid_charge": True,
+        # 0 = plan with the forecast, 1 = plan with the pessimistic P10 when the forecast is uncertain
+        "pv_caution": 0.5,
     },
 }
 BATTERY_LIMITS = (
     ("capacity_kwh", 0.5, 200), ("min_soc", 0, 90), ("max_soc_grid", 10, 100),
-    ("max_charge_kw", 0.1, 50), ("max_discharge_kw", 0.1, 50), ("efficiency", 0.5, 1.0),
+    ("max_charge_kw", 0.1, 50), ("max_discharge_kw", 0.1, 50), ("efficiency", 0.5, 1.0), ("pv_caution", 0.0, 1.0),
 )
 
 _ARRAY_DEFAULTS = {

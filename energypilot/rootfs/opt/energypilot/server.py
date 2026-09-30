@@ -204,6 +204,12 @@ async def _recompute_then_trigger(hub: Hub, arr: dict) -> None:
         hub.trigger()
 
 
+@routes.post("/api/arrays/{array_id}/geometry")
+async def check_geometry(request: web.Request) -> web.Response:
+    hub = _hub(request)
+    return _ok(await asyncio.to_thread(hub.check_geometry, request.match_info["array_id"]))
+
+
 @routes.delete("/api/arrays/{array_id}")
 async def delete_array(request: web.Request) -> web.Response:
     hub = _hub(request)

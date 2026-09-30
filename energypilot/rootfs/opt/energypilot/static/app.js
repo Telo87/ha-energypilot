@@ -215,7 +215,8 @@
 
   // Source colours: fixed per source (identity follows the entity, never its rank)
   const SRC_SLOT = { 'om:best_match': 1, 'om:icon_d2': 2, 'om:ecmwf_ifs025': 3, fs: 4, 'om:icon_eu': 5, 'om:gfs_seamless': 6, 'om:meteofrance_seamless': 7, sc: 8 };
-  const srcColor = (s) => (s === 'ep' ? 'var(--text)' : SRC_SLOT[s] ? `var(--s${SRC_SLOT[s]})` : 'var(--s-other)');
+  const srcColor = (s) => (s === 'ep' ? 'var(--text)' : s === 'nc' ? 'var(--text-2)' : SRC_SLOT[s] ? `var(--s${SRC_SLOT[s]})` : 'var(--s-other)');
+  const BAND = { label: 'Spanne (80 %)', color: 'var(--band)' };
   const BASE = 'base';
   // series picker: all arrays, each array, household base load
   function seriesSelect(id, cur, arrays) {
@@ -246,7 +247,7 @@
   function timeChart(el, c) {
     if (!el) return;
     const n = c.xs.length;
-    const vals = [...(c.bar ? c.bar.values : []), ...c.lines.flatMap((l) => l.values)].filter((v) => v != null);
+    const vals = [...(c.bar ? c.bar.values : []), ...c.lines.flatMap((l) => l.values), ...(c.band ? c.band.hi : [])].filter((v) => v != null);
     if (!n || !vals.length) { el.innerHTML = `<div class="empty" style="padding:70px 0">${c.emptyText || 'Noch keine Daten.'}</div>`; return; }
     const W = Math.max(320, el.clientWidth); const H = c.height || 240;
     const pad = { l: 56, r: 10, t: 14, b: 26 };
@@ -278,6 +279,20 @@
         bars += `<path class="${cls}" d="${barPath(x(i) + gap / 2, y(0), y(v), cw - gap, cw > 8 ? 4 : 1.5)}"/>`;
       });
     }
+    let bandPath = '';
+    if (c.band) {  // one closed shape per stretch where both bounds exist
+      let seg = [];
+      const flush = () => {
+        if (seg.length > 1) {
+          const top = seg.map((i) => `${(x(i) + cw / 2).toFixed(1)},${y(c.band.hi[i]).toFixed(1)}`);
+          const bot = seg.slice().reverse().map((i) => `${(x(i) + cw / 2).toFixed(1)},${y(c.band.lo[i]).toFixed(1)}`);
+          bandPath += `<path class="band" d="M${top.join('L')}L${bot.join('L')}Z" fill="${c.band.color}"/>`;
+        }
+        seg = [];
+      };
+      c.xs.forEach((_x, i) => { if (c.band.lo[i] != null && c.band.hi[i] != null) seg.push(i); else flush(); });
+      flush();
+    }
     let lines = '';
     c.lines.forEach((l) => {
       let d = ''; let pen = false;
@@ -295,7 +310,7 @@
     const drawIn = !el.querySelector('svg');
     el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px" class="${drawIn && !c.noAnim ? 'draw-in' : ''}">
       <g class="gl">${grid}</g><rect class="hover-col" x="0" y="${pad.t}" width="${cw}" height="${H - pad.t - pad.b}" style="display:none"/>
-      <g>${bars}</g><g class="series">${lines}</g>${nowMark}
+      <g>${bars}</g>${bandPath}<g class="series">${lines}</g>${nowMark}
       <rect x="${pad.l}" y="0" width="${W - pad.l - pad.r}" height="${H}" class="hit-col" style="${c.onClick ? '' : 'cursor:default'}"/>
     </svg><div class="tip" style="display:none"></div>`;
     el.style.minHeight = `${H}px`;
@@ -311,6 +326,7 @@
       const rows = [];
       if (c.bar && c.bar.values[i] != null) rows.push(`<div class="row-t"><span><i class="box" style="background:${c.bar.color}"></i>${esc(c.bar.label)}</span><span>${c.fmt(c.bar.values[i])}</span></div>`);
       c.lines.forEach((l) => { if (l.values[i] != null) rows.push(`<div class="row-t"><span><i style="background:${l.color}"></i>${esc(l.label)}</span><span>${c.fmt(l.values[i])}</span></div>`); });
+      if (c.band && c.band.lo[i] != null && c.band.hi[i] != null) rows.push(`<div class="row-t"><span><i class="box" style="background:${c.band.color}"></i>${esc(c.band.label)}</span><span>${c.fmt(c.band.lo[i])} – ${c.fmt(c.band.hi[i])}</span></div>`);
       if (!rows.length) { tip.style.display = 'none'; return; }
       tip.innerHTML = `<b>${(c.head || fmtHour)(c.xs[i])}</b>${rows.join('')}`;
       tip.style.display = '';
@@ -489,7 +505,7 @@
           <div class="row wrap" style="gap:8px"><span class="badge ${plan.buy_now ? 'accent' : ''}">Strom kaufen: ${plan.buy_now ? 'ja' : 'nein'}</span><a class="btn sm" href="#/plan">${ic('battery')}Zur Planung</a></div></div>`
         : `<div class="now-decision"><div class="now-kicker">Empfehlung jetzt</div><div class="now-title">Noch kein Plan</div><p class="muted">${esc((plan && plan.reason) || 'Wird berechnet …')}</p></div>`;
       const flows = [
-        flowNode('solar', 'warn', 'PV-Erzeugung', wv('pv', pvNow), pvVals.length ? ov.arrays.map((a) => `${esc(a.name)} ${fmtW(val(`pv:${a.id}`))}`).join(' · ') : missing()),
+        flowNode('solar', 'warn', 'PV-Erzeugung', wv('pv', pvNow), pvVals.length ? `${ov.arrays.map((a) => `${esc(a.name)} ${fmtW(val(`pv:${a.id}`))}`).join(' · ')}${nowcastText(plan)}` : missing()),
         flowNode('home', '', 'Hausverbrauch', wv('house', val('house')), lv.house ? (ov.load ? `Grundverbrauch heute ~${nf(ov.load.today, 1)} kWh` : 'aktuell') : missing()),
         flowNode('battery', 'ok', 'Akku', soc == null ? '–' : `${cnt('soc', nf(soc, 0))}<small>%</small>`, `${bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'}${rt ? ` · ${rt.empty_at ? `reicht bis ${fmtWhen(rt.empty_at)}` : 'reicht bis morgen Abend'}` : ''}`),
         flowNode('plug', grid != null && grid < 0 ? 'ok' : '', grid != null && grid < 0 ? 'Einspeisung' : 'Netzbezug', wv('grid', grid == null ? null : Math.abs(grid)), lv.grid ? (grid > 20 ? 'Strom wird gekauft' : grid < -20 ? 'Überschuss geht ins Netz' : 'ausgeglichen') : missing()),
@@ -497,7 +513,7 @@
       const nowCard = `<div class="card now-card"><div class="card-body now-grid">${decision}<div class="flow-grid">${flows}</div></div></div>`;
       const kpis = [
         kpi('price', 'euro', pr && avg != null && pr.price <= avg ? 'ok' : 'warn', 'Strompreis jetzt', pr ? cnt('price', nf(pr.price, 1)) : '–', pr ? 'ct/kWh' : '', pr ? `Börse ${nf(pr.spot, 1)} ct · Ø heute ${nf(avg, 1)} ct` : 'noch keine Preise'),
-        kpi('today', 'sun', 'up', 'PV heute', cnt('prod', nf(ov.produced_kwh, 1)), 'kWh', best ? `Prognose ${nf(best.today, 1)} kWh · morgen ${nf(best.tomorrow, 1)} kWh` : 'noch keine Prognose'),
+        kpi('today', 'sun', 'up', 'PV heute', cnt('prod', nf(ov.produced_kwh, 1)), 'kWh', best ? `Prognose ${nf(best.today, 1)} kWh${ov.pv_range ? ` (${nf(ov.pv_range.today[0], 0)}–${nf(ov.pv_range.today[1], 0)})` : ''} · morgen ${nf(best.tomorrow, 1)} kWh` : 'noch keine Prognose'),
         ov.load ? kpi('load', 'home', '', 'Grundverbrauch heute', `~${cnt('lt', nf(ov.load.today, 1))}`, 'kWh', `Prognose ohne E-Auto und Heizstab · morgen ~${nf(ov.load.tomorrow, 1)} kWh`) : '',
       ].join('');
 
@@ -531,7 +547,9 @@
         const bar = { ...MEASURED, cls: 'bar-m', values: [...day.actual, ...tomorrow.actual] };
         const series = (d, key) => (key === loadKey ? ((d === day ? loadDay : loadTomorrow).forecasts.ep || {}).d0 : (d.forecasts[key] || {}).d0) || d.hours.map(() => null);
         const ln = lines.filter((l) => !hidden.has(l.key)).map((l) => ({ ...l, values: [...series(day, l.key), ...series(tomorrow, l.key)] }));
-        chart($('#pvChart'), { xs, step: 3600, bar, lines: ln, fmt: (v) => fmtW(v).replace('W', 'Wh'), axisFmt: (v) => (v >= 1000 ? `${nf(v / 1000, 1)} kWh` : `${nf(v)} Wh`), head: (ts) => `${fmtDay(ts)} ${fmtHour(ts)}–${fmtHour(ts + 3600)}`, tick: (ts) => (new Date(ts * 1000).getHours() === 0 ? fmtDay(ts) : fmtHour(ts)), tickAt: (ts) => new Date(ts * 1000).getHours() % 6 === 0, height: 280, now: ov.now, noAnim: drawn, onClick: (i) => { location.hash = `#/day?d=${i < day.hours.length ? day.day : tomorrow.day}`; } });
+        const bd = (d, k) => ((d.band || {}).d0 || {})[k] || d.hours.map(() => null);
+        const band = !hidden.has('ep') && sources.includes('ep') ? { ...BAND, lo: [...bd(day, 'lo'), ...bd(tomorrow, 'lo')], hi: [...bd(day, 'hi'), ...bd(tomorrow, 'hi')] } : null;
+        chart($('#pvChart'), { xs, step: 3600, bar, lines: ln, band, fmt: (v) => fmtW(v).replace('W', 'Wh'), axisFmt: (v) => (v >= 1000 ? `${nf(v / 1000, 1)} kWh` : `${nf(v)} Wh`), head: (ts) => `${fmtDay(ts)} ${fmtHour(ts)}–${fmtHour(ts + 3600)}`, tick: (ts) => (new Date(ts * 1000).getHours() === 0 ? fmtDay(ts) : fmtHour(ts)), tickAt: (ts) => new Date(ts * 1000).getHours() % 6 === 0, height: 280, now: ov.now, noAnim: drawn, onClick: (i) => { location.hash = `#/day?d=${i < day.hours.length ? day.day : tomorrow.day}`; } });
         $$('.legend button[data-series]', el).forEach((b) => b.addEventListener('click', () => { toggleHidden(b.dataset.series); draw(S.overview); }));
       }
       priceChart($('#priceChart'), ov.prices, ov.now, 200);
@@ -558,6 +576,13 @@
     });
   }
 
+  // how the last hour compares with the forecast (drives the correction of the next hours)
+  function nowcastText(plan) {
+    const n = plan && plan.nowcast;
+    if (!n || !n.factor || Math.abs(n.factor - 1) < 0.05) return '';
+    return ` · letzte Stunde ${signed((n.factor - 1) * 100, 0)} % zur Prognose`;
+  }
+
   // ------------------------------------------------------------------- plan
   async function renderPlan(el, token) {
     let first = true;
@@ -567,7 +592,8 @@
       draw(p, ov); first = false;
     };
     const draw = (p, ov) => {
-      setHeader('Planung', p.ok ? `Plan bis ${fmtWhen(p.horizon_end, true)} · PV: ${esc(p.pv_source || 'Open-Meteo Auto')} · Verbrauch: ${esc(p.load_source)}` : '', refreshBtn());
+      const nc = p.nowcast && p.nowcast.factor && Math.abs(p.nowcast.factor - 1) >= 0.05 ? ` · live korrigiert (${signed((p.nowcast.factor - 1) * 100, 0)} %)` : '';
+      setHeader('Planung', p.ok ? `Plan bis ${fmtWhen(p.horizon_end, true)} · PV: ${esc(p.pv_source || 'Open-Meteo Auto')}${nc} · Verbrauch: ${esc(p.load_source)}` : '', refreshBtn());
       bindRefresh(load);
       if (!p.ok && !p.runtime) {
         el.innerHTML = `<div class="card"><div class="card-body">${empty('battery', 'Noch kein Plan', esc(p.reason || ''), `<a class="btn primary" href="#/settings?tab=sensors">${ic('gear')}Sensoren einstellen</a> <a class="btn" href="#/settings?tab=battery">Batterie einstellen</a>`)}</div></div>`;
@@ -694,21 +720,23 @@
     const arrays = (S.settings ? S.settings.arrays : []).filter((a) => model && model[a.id]);
     if (!arrays.length) return '';
     const hourChips = (f) => {
-      const notable = Object.entries(f).filter(([, v]) => Math.abs(v - 1) >= 0.03);
-      if (!notable.length) return '<span class="faint">keine nennenswerte Korrektur nötig</span>';
+      const notable = Object.entries(f || {}).filter(([, v]) => Math.abs(v - 1) >= 0.05);
+      if (!notable.length) return '<span class="faint">keine nennenswerte Korrektur</span>';
       return notable.map(([h, v]) => `<span class="badge ${v < 1 ? 'warn' : 'accent'}" title="${h}:00–${Number(h) + 1}:00 Uhr">${h} Uhr ${signed((v - 1) * 100, 0)} %</span>`).join(' ');
     };
     return `<div class="card"><div class="card-head"><h2>So rechnet die eigene Prognose <span class="sub">gelernt aus den letzten ${model[arrays[0].id].days} Tagen</span></h2></div>
-      <div class="card-body"><p class="explain">EnergyPilot gewichtet jede Quelle danach, wie gut sie bei dieser Anlage zuletzt lag (je nach erwarteter Wetterlage unterschiedlich), und korrigiert das Ergebnis je Uhrzeit – z. B. wenn morgens ein Baum Schatten wirft oder der Wechselrichter mittags abregelt. Neu gelernt wird jede Stunde.</p>
+      <div class="card-body"><p class="explain">EnergyPilot gewichtet jede Quelle danach, wie gut sie bei dieser Anlage zuletzt lag (je nach erwarteter Wetterlage), und korrigiert das Ergebnis je Uhrzeit – <b>getrennt für Sonne und Wolken</b>: Schatten von Bäumen oder Nachbarhäusern wirkt nur bei direkter Sonne, systematische Fehler der Wettermodelle zeigen sich auch bei Bewölkung. Neu gelernt wird jede Stunde.</p>
       <div class="grid cols-2">${arrays.map((a) => {
         const m = model[a.id];
         const w = Object.entries(m.weights).sort((x, y) => y[1] - x[1]);
+        const f = m.factors || {};
         return `<div><div style="font-weight:650;margin-bottom:8px">${esc(a.name)}</div>
           ${w.map(([src, share]) => `<div class="row" style="gap:10px;margin-bottom:6px;font-size:13px"><span class="swatch-dot" style="background:${srcColor(src)}"></span><span style="width:130px" class="nowrap">${esc(sourceName(src))}</span><div class="bar" style="flex:1"><i style="width:${Math.round(share * 100)}%;background:${srcColor(src)}"></i></div><b class="num" style="width:44px;text-align:right">${pct(share * 100, 0)}</b></div>`).join('')}
-          <div style="font-size:12.5px;margin-top:10px;line-height:2"><span class="muted">Korrektur nach Uhrzeit:</span> ${hourChips(m.factors)}</div></div>`;
+          <div style="font-size:12.5px;margin-top:10px;line-height:2"><span class="muted">${ic('sun')} Bei Sonne:</span> ${hourChips(f.sunny)}</div>
+          <div style="font-size:12.5px;line-height:2"><span class="muted">${ic('cloud')} Bei Wolken:</span> ${hourChips(f.cloudy)}</div></div>`;
       }).join('')}</div></div></div>`;
   }
-  const SOURCE_NAMES = { 'om:best_match': 'Open-Meteo Auto', 'om:icon_d2': 'DWD ICON-D2', 'om:icon_eu': 'DWD ICON-EU', 'om:ecmwf_ifs025': 'ECMWF IFS', 'om:gfs_seamless': 'NOAA GFS', 'om:meteofrance_seamless': 'Météo-France', 'om:knmi_seamless': 'KNMI Harmonie', 'om:ukmo_seamless': 'UK Met Office', fs: 'Forecast.Solar', sc: 'Solcast', ep: 'EnergyPilot (lernend)', lw: 'Wie vor einer Woche' };
+  const SOURCE_NAMES = { 'om:best_match': 'Open-Meteo Auto', 'om:icon_d2': 'DWD ICON-D2', 'om:icon_eu': 'DWD ICON-EU', 'om:ecmwf_ifs025': 'ECMWF IFS', 'om:gfs_seamless': 'NOAA GFS', 'om:meteofrance_seamless': 'Météo-France', 'om:knmi_seamless': 'KNMI Harmonie', 'om:ukmo_seamless': 'UK Met Office', fs: 'Forecast.Solar', sc: 'Solcast', ep: 'EnergyPilot (lernend)', nc: 'EnergyPilot (live korrigiert)', lw: 'Wie vor einer Woche' };
   const sourceName = (src) => SOURCE_NAMES[src] || src;
 
   // --------------------------------------------------------------- accuracy
@@ -837,6 +865,7 @@
         xs: d.hours, step: 3600, height: 300, now: Math.floor(Date.now() / 1000),
         bar: { ...MEASURED, cls: 'bar-m', values: d.actual },
         lines: lines.filter((l) => !hidden.has(l.key)).map((l) => ({ ...l, values: (d.forecasts[l.key] || {})[cfg.horizon] || d.hours.map(() => null) })),
+        band: !hidden.has('ep') && d.forecasts.ep && (d.band || {})[cfg.horizon] ? { ...BAND, ...d.band[cfg.horizon] } : null,
         fmt: (v) => `${nf(v)} Wh`, axisFmt: (v) => (v >= 1000 ? `${nf(v / 1000, 1)} kWh` : `${nf(v)} Wh`),
         head: (ts) => `${fmtHour(ts)}–${fmtHour(ts + 3600)}`, tickAt: (ts) => new Date(ts * 1000).getHours() % 3 === 0,
         emptyText: 'Für diesen Tag gibt es keine Daten.',
@@ -1001,12 +1030,45 @@
         <div class="card-body flush"><div class="list">${arrays.map((a) => `<div class="list-item clickable" data-edit="${a.id}">
             <div class="avatar accent">${ic('solar')}</div>
             <div class="grow"><div class="title">${esc(a.name)}</div><div class="meta">${nf(a.kwp, 2)} kWp · ${planesText(a)}${a.ac_max_kw ? ` · max. ${nf(a.ac_max_kw, 1)} kW` : ''} · ${a.sensor ? `<span class="mono">${esc(a.sensor)}</span>` : '<span class="pos">kein Messsensor</span>'}</div></div>
+            ${a.sensor ? `<button class="btn sm" data-geo="${a.id}" title="Aus den Messwerten prüfen, ob Ausrichtung und Neigung stimmen">${ic('compass')}<span class="hide-sm">Ausrichtung prüfen</span></button>` : ''}
             <button class="icon-btn" title="Bearbeiten">${ic('edit')}</button></div>`).join('')
           || '<div class="muted" style="padding:6px 18px 14px;font-size:13px">Noch keine Anlage. Lege für jeden Messsensor (meist ein Wechselrichter) eine Anlage an. Zeigen Module an einem Wechselrichter in verschiedene Richtungen – z. B. ein String nach Osten, einer nach Westen –, trägst du sie als Teilflächen derselben Anlage ein.</div>'}</div></div></div>
         <div class="notice info" style="margin-top:16px">${ic('info')}<div><b>Messsensor:</b> Ein Leistungssensor (W/kW, z. B. „AC-Leistung“ des Fronius-Wechselrichters) oder ein Energiezähler (Wh/kWh). Er braucht eine Langzeitstatistik (state_class) – dann liest EnergyPilot die Erzeugung der letzten ${S.settings.backfill_days} Tage rückwirkend aus Home Assistant und kann die Prognosen sofort vergleichen.</div></div>`;
       $('#addArr').addEventListener('click', () => arrayForm());
-      $$('[data-edit]').forEach((r) => r.addEventListener('click', () => arrayForm(S.settings.arrays.find((a) => a.id === r.dataset.edit))));
+      $$('[data-edit]').forEach((r) => r.addEventListener('click', (e) => { if (!e.target.closest('[data-geo]')) arrayForm(S.settings.arrays.find((a) => a.id === r.dataset.edit)); }));
+      $$('[data-geo]').forEach((b) => b.addEventListener('click', () => geometryCheck(S.settings.arrays.find((a) => a.id === b.dataset.geo))));
     };
+    function geometryCheck(cfg) {
+      const planeTxt = (ps) => ps.map((p) => `${dirName(p.azimuth)} ${nf(p.azimuth, 0)}° · ${nf(p.tilt, 0)}° Neigung`).join('<br>');
+      modal({
+        title: `Ausrichtung prüfen – ${cfg.name}`,
+        body: `<div id="geoBody"><div class="notice info">${ic('refresh', 'spin')}<div>EnergyPilot rechnet für verschiedene Ausrichtungen und Neigungen die Erzeugung der klaren Stunden nach und vergleicht sie mit deinen Messwerten …</div></div></div>`,
+        foot: '<button class="btn" data-close>Schließen</button><button class="btn primary hidden" id="geoApply">Übernehmen</button>',
+        async onMount(m, close) {
+          let r;
+          try { r = await api(`arrays/${cfg.id}/geometry`, { method: 'POST' }); } catch (e) { m.querySelector('#geoBody').innerHTML = errorBox(e.message); return; }
+          if (!r.ok) { m.querySelector('#geoBody').innerHTML = `<div class="notice">${ic('info')}<div>${esc(r.reason)}</div></div>`; return; }
+          const eff = r.implied_efficiency;
+          m.querySelector('#geoBody').innerHTML = `
+            <p class="explain">Grundlage: <b>${r.hours} klare Stunden</b> an ${r.days} Tagen (Sonnenhöhe über 20°, Wetter aus ${esc(r.model)}). Verglichen wird nur die <b>Form</b> der Tageskurve – die Höhe (kWp, Verluste) wird für jede Variante angepasst.</p>
+            <div class="table-wrap"><table class="table compact"><thead><tr><th></th><th>Ausrichtung / Neigung</th><th class="num">Abweichung</th></tr></thead><tbody>
+              <tr><td>Eingetragen</td><td>${planeTxt(r.current_planes)}</td><td class="num">${pct(r.current_error, 1)}</td></tr>
+              <tr><td><b>Passt am besten</b></td><td>${planeTxt(r.planes)}</td><td class="num best">${pct(r.best_error, 1)}</td></tr>
+            </tbody></table></div>
+            <div class="notice ${r.suggest ? 'info' : ''}" style="margin-top:12px">${ic(r.suggest ? 'info' : 'checkCircle')}<div>${r.suggest
+              ? `Die Messwerte passen deutlich besser zu <b>${r.rotation ? `${signed(r.rotation, 0)}° gedreht` : ''}${r.rotation && r.tilt_offset ? ' und ' : ''}${r.tilt_offset ? `${signed(r.tilt_offset, 0)}° ${r.tilt_offset > 0 ? 'steiler' : 'flacher'}` : ''}</b> (${nf(r.improvement, 0)} % weniger Abweichung). Das kann auch an Schatten liegen, der über den Tag wandert – übernimm den Vorschlag, wenn er zu deinem Dach passt.`
+              : 'Die eingetragene Ausrichtung passt gut zu den Messwerten.'}</div></div>
+            ${eff && Math.abs(eff - r.efficiency) >= 0.05 ? `<p class="faint" style="font-size:12.5px;margin:10px 0 0">Die Messwerte liegen insgesamt bei etwa ${pct(eff * 100, 0)} statt ${pct(r.efficiency * 100, 0)} Systemwirkungsgrad – das gleicht die lernende Prognose bereits aus; ändern kannst du ihn unter „Erweitert“.</p>` : ''}`;
+          const btn = m.querySelector('#geoApply');
+          if (r.suggest) {
+            btn.classList.remove('hidden');
+            btn.addEventListener('click', (e) => withBusy(e.currentTarget, async () => {
+              try { await api('arrays', { method: 'POST', body: { id: cfg.id, planes: r.planes } }); await loadSettings(); close(); draw(); toast('Ausrichtung übernommen – alle Wettermodell-Prognosen werden neu berechnet.'); } catch (err) { toast(err.message, 'err'); }
+            }));
+          }
+        },
+      });
+    }
     async function arrayForm(cfg = {}) {
       const isNew = !cfg.id;
       let ents = [];
@@ -1171,10 +1233,15 @@
           ${f('b_max', 'Netzladen bis', b.max_soc_grid, '%', 'höchster Ladezustand beim Laden aus dem Netz', 'step="1" min="10" max="100"')}
         </div>
         <label class="check" style="margin:4px 0 16px"><input type="checkbox" id="b_grid" ${b.grid_charge ? 'checked' : ''}>Laden aus dem Netz einplanen, wenn es sich lohnt</label>
+        <div class="field"><label>Sicherheitsabschlag bei unsicherer PV-Prognose</label>
+          <div class="seg" id="b_caution">${[[0, 'Aus'], [0.5, 'Mittel'], [1, 'Vorsichtig']].map(([v, l]) => `<button type="button" data-v="${v}" class="${Number(b.pv_caution ?? 0.5) === v ? 'active' : ''}">${l}</button>`).join('')}</div>
+          <span class="hint">Der Planer rechnet mit weniger Sonne, je unsicherer die Prognose ist („Vorsichtig“ = untere Grenze der Spanne). So bleibt der Akku eher für den Abend gefüllt, wenn der Tag trüber wird als erwartet.</span></div>
         <button class="btn primary" id="b_save">${ic('check')}Speichern</button></div></div></div>`;
     $('#b_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({ battery: {
       capacity_kwh: $('#b_cap').value, min_soc: $('#b_min').value, max_charge_kw: $('#b_pc').value, max_discharge_kw: $('#b_pd').value,
-      efficiency: Number($('#b_eff').value) / 100, max_soc_grid: $('#b_max').value, grid_charge: $('#b_grid').checked } })));
+      efficiency: Number($('#b_eff').value) / 100, max_soc_grid: $('#b_max').value, grid_charge: $('#b_grid').checked,
+      pv_caution: Number(($('#b_caution button.active') || {}).dataset?.v ?? 0.5) } })));
+    $$('#b_caution button').forEach((btn) => btn.addEventListener('click', () => { $$('#b_caution button').forEach((x) => x.classList.toggle('active', x === btn)); }));
   }
 
   // Plausibility check: what the chosen sensors measured on average per day

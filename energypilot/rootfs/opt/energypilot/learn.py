@@ -8,12 +8,18 @@ PV ("ep"), per array:
 1. Every source is weighted by its past error (inverse mean squared error),
    separately for the expected weather situation (sunny / mixed / cloudy,
    judged from the sources' own forecast relative to a clear sky).
-2. The weighted mean is multiplied by a correction factor per hour of day.
-   It learns what no weather model knows: shading in the morning, a tree in
-   the evening, clipping, soiling, snow.
+2. The weighted mean is multiplied by a correction factor per hour of day,
+   learned separately for sunny and for cloudy hours: shade from a tree or a
+   neighbouring house only matters when the sun shines, a systematic bias of
+   the weather models also shows under clouds. It learns what no weather
+   model knows - shading, clipping, soiling, snow. (A shading map by sun
+   position was tried as well; on real data it was not more accurate than
+   this, as long as the history covers less than a year.)
+3. An uncertainty band (P10-P90) from the distribution of past errors in the
+   same weather situation.
 
 Base load ("ep" on series "base"): household consumption without EV and
-heating rod – profile per hour and day type with recent weeks weighted more,
+heating rod - profile per hour and day type with recent weeks weighted more,
 corrected by the day's mean temperature if consumption depends on it.
 """
 
@@ -25,23 +31,46 @@ from dataclasses import dataclass, field
 
 PV_SOURCE = "ep"
 LOAD_SOURCE = "ep"
-NAIVE_SOURCE = "lw"  # "like last week" – the benchmark for the load forecast
+NAIVE_SOURCE = "lw"  # "like last week" - the benchmark for the load forecast
+NOWCAST_SOURCE = "nc"  # own forecast corrected with the live production of the last hour
+BAND_LO = "ep:lo"  # P10 of the own forecast
+BAND_HI = "ep:hi"  # P90
 BASE_SERIES = "base"
-LEARNED_SOURCES = (PV_SOURCE, NAIVE_SOURCE)
+# never used as input for learning (own results, benchmarks, bands)
+LEARNED_SOURCES = (PV_SOURCE, NAIVE_SOURCE, NOWCAST_SOURCE, BAND_LO, BAND_HI)
 
 TRAIN_DAYS = 30
 MIN_TRAIN_DAYS = 5
 MIN_SOURCE_HOURS = 30
 SHRINK_ERR = 24  # hours of "prior" per weather bucket (pulls towards the overall error)
 SHRINK_FACTOR = 8  # hours of "prior" per hour-of-day factor (pulls towards 1)
+SHRINK_SPLIT = 12  # hours of "prior" for the sunny / cloudy factor (pulls towards the joint one)
+SUNNY_K = 0.6  # expected clear-sky index from which an hour counts as sunny
 FACTOR_RANGE = (0.3, 1.6)
 CLEAR_MARGIN = 1.2  # a forecast never exceeds the clear-sky value by more than this
+BAND_Q = (0.1, 0.9)
 LOAD_TRAIN_DAYS = 28
 LOAD_HALF_LIFE = 14.0  # days
+BUCKETS = ("sunny", "mixed", "cloudy")
 
 
 def bucket(k: float) -> str:
-    return "sunny" if k >= 0.6 else "mixed" if k >= 0.3 else "cloudy"
+    return "sunny" if k >= SUNNY_K else "mixed" if k >= 0.3 else "cloudy"
+
+
+def _quantile(values: list[float], q: float) -> float:
+    v = sorted(values)
+    if not v:
+        return 1.0
+    pos = (len(v) - 1) * q
+    lo = int(pos)
+    hi = min(lo + 1, len(v) - 1)
+    return v[lo] + (v[hi] - v[lo]) * (pos - lo)
+
+
+def _bounded(n: int, raw: float, prior: float, strength: float) -> float:
+    f = (n * raw + strength * prior) / (n + strength)
+    return min(FACTOR_RANGE[1], max(FACTOR_RANGE[0], f))
 
 
 @dataclass
@@ -58,9 +87,13 @@ class PVHour:
         med = vals[len(vals) // 2] if len(vals) % 2 else (vals[len(vals) // 2 - 1] + vals[len(vals) // 2]) / 2
         return med / self.clear if self.clear > 0 else 0.0
 
+    @property
+    def sunny(self) -> bool:
+        return self.expected_k >= SUNNY_K
+
 
 class PVModel:
-    """Weighted ensemble + hour-of-day correction, fitted on past hours."""
+    """Weighted ensemble + hour-of-day correction (sunny / cloudy) + error band."""
 
     def __init__(self, train: list[PVHour]) -> None:
         rows = [h for h in train if h.actual is not None and h.clear > 0 and h.fc]
@@ -80,28 +113,42 @@ class PVModel:
         self.weights: dict[tuple[str, str], float] = {}
         for s in self.sources:
             mse = se_all[s] / n_all[s] + 1.0
-            for b in ("sunny", "mixed", "cloudy"):
+            for b in BUCKETS:
                 shrunk = (se_b[s, b] + SHRINK_ERR * mse) / (n_b[s, b] + SHRINK_ERR)
                 self.weights[s, b] = 1.0 / (shrunk + 1.0)
-        # hour-of-day correction of the ensemble
-        a_sum: dict[int, float] = defaultdict(float)
-        e_sum: dict[int, float] = defaultdict(float)
-        n_h: dict[int, int] = defaultdict(int)
+        self.days = len({h.t // 86400 for h in rows})
+
+        # correction per hour of day: first over all hours, then split into sunny / cloudy
+        acc: dict[tuple[int, bool | None], list[float]] = defaultdict(lambda: [0.0, 0.0, 0])
+        ens: list[tuple[PVHour, float]] = []
         for h in rows:
             e = self._ensemble(h)
             if e is None:
                 continue
-            a_sum[h.hour] += h.actual
-            e_sum[h.hour] += e
-            n_h[h.hour] += 1
-        self.factor: dict[int, float] = {}
-        for hour, n in n_h.items():
-            if e_sum[hour] < 50:  # too little energy in this hour to learn from
-                continue
-            raw = a_sum[hour] / e_sum[hour]
-            f = (n * raw + SHRINK_FACTOR) / (n + SHRINK_FACTOR)
-            self.factor[hour] = min(FACTOR_RANGE[1], max(FACTOR_RANGE[0], f))
-        self.days = len({h.t // 86400 for h in rows})
+            ens.append((h, e))
+            for key in ((h.hour, None), (h.hour, h.sunny)):
+                acc[key][0] += h.actual
+                acc[key][1] += e
+                acc[key][2] += 1
+        self.factor: dict[tuple[int, bool | None], float] = {}
+        for (hour, kind), (a, e, n) in acc.items():
+            if kind is None and e >= 50:  # too little energy in this hour to learn from otherwise
+                self.factor[hour, None] = _bounded(int(n), a / e, 1.0, SHRINK_FACTOR)
+        for (hour, kind), (a, e, n) in acc.items():
+            if kind is not None and e >= 50:
+                self.factor[hour, kind] = _bounded(int(n), a / e, self.factor.get((hour, None), 1.0), SHRINK_SPLIT)
+
+        # error band: spread of actual / forecast in the same weather situation
+        ratios: dict[str, list[float]] = defaultdict(list)
+        for h, e in ens:
+            pred = e * self._hour_factor(h)
+            if pred >= 50:
+                ratios[bucket(h.expected_k)].append(h.actual / pred)
+        all_r = [r for v in ratios.values() for r in v]
+        self.band: dict[str, tuple[float, float]] = {}
+        for b in BUCKETS:
+            src = ratios[b] if len(ratios.get(b, [])) >= 20 else all_r
+            self.band[b] = (_quantile(src, BAND_Q[0]), _quantile(src, BAND_Q[1])) if src else (0.7, 1.2)
 
     @property
     def ready(self) -> bool:
@@ -117,32 +164,58 @@ class PVModel:
                 den += w
         return num / den if den > 0 else None
 
+    def _hour_factor(self, h: PVHour) -> float:
+        return self.factor.get((h.hour, h.sunny), self.factor.get((h.hour, None), 1.0))
+
     def predict(self, h: PVHour) -> float | None:
         if h.clear <= 0:
             return 0.0
         e = self._ensemble(h)
         if e is None:
             return None
-        return max(0.0, min(h.clear * CLEAR_MARGIN, e * self.factor.get(h.hour, 1.0)))
+        return max(0.0, min(h.clear * CLEAR_MARGIN, e * self._hour_factor(h)))
+
+    def predict_band(self, h: PVHour) -> tuple[float, float, float] | None:
+        """(P10, forecast, P90)"""
+        v = self.predict(h)
+        if v is None:
+            return None
+        lo, hi = self.band[bucket(h.expected_k)]
+        cap = h.clear * CLEAR_MARGIN
+        return max(0.0, min(v, v * lo)), v, (min(max(v, v * hi), cap) if cap > 0 else v)
 
     def weight_share(self) -> dict[str, float]:
         """Mean weight share per source (for display)."""
-        tot = defaultdict(float)
-        for b in ("sunny", "mixed", "cloudy"):
+        tot: dict[str, float] = defaultdict(float)
+        for b in BUCKETS:
             den = sum(self.weights[s, b] for s in self.sources)
             for s in self.sources:
                 tot[s] += self.weights[s, b] / den / 3 if den else 0
         return dict(tot)
 
+    def hour_factors(self) -> dict[str, dict[int, float]]:
+        """Correction per hour for sunny and cloudy hours (for display)."""
+        out: dict[str, dict[int, float]] = {"sunny": {}, "cloudy": {}}
+        for (hour, kind), f in sorted(self.factor.items(), key=lambda kv: kv[0][0]):
+            if kind is not None:
+                out["sunny" if kind else "cloudy"][hour] = round(f, 3)
+        return out
 
-def pv_walk_forward(
-    days: list[str], by_day: dict[str, list[PVHour]], train_days: int = TRAIN_DAYS
-) -> tuple[dict[int, float], PVModel | None]:
+
+@dataclass
+class PVResult:
+    forecast: dict[int, float] = field(default_factory=dict)
+    lo: dict[int, float] = field(default_factory=dict)
+    hi: dict[int, float] = field(default_factory=dict)
+    model: PVModel | None = None
+
+
+def pv_walk_forward(days: list[str], by_day: dict[str, list[PVHour]], train_days: int = TRAIN_DAYS) -> PVResult:
     """Forecast every day in ``days`` from the ``train_days`` days before it.
 
-    Returns the forecasts and the model of the last day (the one in use now)."""
+    ``model`` is the one of the last day (the one in use now)."""
     ordered = sorted(by_day)
-    out: dict[int, float] = {}
+    out = PVResult()
     model = None
     for day in sorted(days):
         past = [d for d in ordered if d < day][-train_days:]
@@ -150,10 +223,23 @@ def pv_walk_forward(
         if not model.ready:
             continue
         for h in by_day.get(day, []):
-            v = model.predict(h)
-            if v is not None:
-                out[h.t] = v
-    return out, model if model is not None and model.ready else None
+            band = model.predict_band(h)
+            if band is not None:
+                out.lo[h.t], out.forecast[h.t], out.hi[h.t] = band
+    out.model = model if model is not None and model.ready else None
+    return out
+
+
+def nowcast_factor(actual_w: float, forecast_w: float) -> float | None:
+    """Ratio of the measured to the forecast power of the last hour, bounded."""
+    if forecast_w < 150 or actual_w < 0:
+        return None
+    return min(1.8, max(0.3, actual_w / forecast_w))
+
+
+# weight of the last hour's deviation for the current hour, +1 h, +2 h - tuned on real data:
+# higher weights overreact to passing clouds and made the next hours worse
+NOWCAST_WEIGHTS = (0.4, 0.2, 0.1)
 
 
 # --------------------------------------------------------------- base load

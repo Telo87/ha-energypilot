@@ -190,3 +190,28 @@ def test_horizons(tmp_path):
     later_today = int(now // 3600 * 3600) + 3600
     assert hub.horizons(later_today, now) == (["d0"] if later_today < tomorrow else ["d0", "d1"])
     assert hub.horizons(midnight, now) == []
+
+
+def test_geometry_fit_finds_rotation():
+    from energypilot import geometry
+
+    true = Array.single("t", 8, 35, 205)
+    weather, actual = [], {}
+    for day in range(10):
+        d0 = utc(2026, 6, 10 + day, 0, 0)
+        for h in range(24):
+            t = d0 + h * 3600
+            ghi, _el = geometry._clear_ghi(t, LAT, LON)
+            weather.append((t, ghi, 0.15 * ghi, 20.0))
+            actual[t] = pv_hour(t, ghi, 0.15 * ghi, 20.0, true, LAT, LON) * 0.9  # losses: scale is fitted away
+    res = geometry.fit(Array.single("t", 8, 35, 180), weather, actual, LAT, LON)
+    assert res["ok"] and res["suggest"]
+    assert res["rotation"] in (20, 25, 30)
+    assert res["best_error"] < res["current_error"]
+    assert abs(res["planes"][0]["azimuth"] - 205) <= 5
+
+
+def test_band_is_not_a_source_but_weather_models_are():
+    fc = [("om:icon_d2", "a", 0, 100.0), ("ep", "a", 0, 90.0), ("ep:lo", "a", 0, 50.0), ("ep:hi", "a", 0, 120.0)]
+    ds = analysis.Dataset(fc, [("a", 0, 95.0)], ["a"], TZ)
+    assert ds.sources == ["ep", "om:icon_d2"]

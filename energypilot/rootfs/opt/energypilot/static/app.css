@@ -656,3 +656,9 @@ svg.i.flip { transform: scaleX(-1); }
   .icon-btn { min-width: 40px; min-height: 40px; }
   .seg button { min-height: 36px; }
 }
+
+/* uncertainty band and shading map */
+:root { --band: rgba(15, 23, 42, .1); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --band: rgba(231, 236, 246, .12); } }
+:root[data-theme="dark"] { --band: rgba(231, 236, 246, .12); }
+.chart .band { stroke: none; }

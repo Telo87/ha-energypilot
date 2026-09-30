@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+- Neu: **Live-Korrektur** – die gemessene PV-Leistung der letzten Stunde wird mit der Prognose verglichen und korrigiert die laufende und die nächsten zwei Stunden (Gewichte 0,4 / 0,2 / 0,1, an echten Daten abgestimmt: rund 10 % genauer für die nächste Stunde). Eigene Quelle „EnergyPilot (live korrigiert)“ im Prognose-Check (kurzfristig); der Planer rechnet damit
+- **Korrektur je Uhrzeit getrennt für Sonne und Wolken**: Schatten wirkt nur bei direkter Sonne, systematische Fehler der Wettermodelle auch bei Bewölkung. (Eine Schattenkarte nach Sonnenstand wurde ebenfalls gebaut und an echten Daten getestet – sie war nicht genauer und wurde wieder entfernt.)
+- Neu: **Ausrichtung prüfen** (Einstellungen › PV-Anlagen) – aus klaren Stunden wird berechnet, welche Ausrichtung und Neigung am besten zu den Messwerten passen; Vorschlag mit einem Klick übernehmen
+- Neu: **Unsicherheit** – Spanne (P10–P90) der eigenen Prognose als Band in den Diagrammen und als „von–bis“ bei PV heute; im Planer ein einstellbarer **Sicherheitsabschlag** (Einstellungen › Batterie: Aus / Mittel / Vorsichtig)
+- Behoben: Die „genaueste Quelle“ wurde nach dem Tagesfehler gewählt, die Rangliste nach dem Stundenfehler – jetzt überall der Stundenfehler (der Planer konnte eine andere Quelle verwenden als angezeigt)
+
+## 0.3.5
+
+- Behoben: Die „genaueste Quelle“ (für Planung, Übersicht und die PV-Sensoren) wurde nach dem Tagesfehler gewählt, die Rangliste im Prognose-Check nach dem Stundenfehler – dadurch konnte der Planer eine andere Quelle verwenden als die, die als genaueste angezeigt wird. Jetzt zählt überall der Stundenfehler, denn der Planer rechnet Stunde für Stunde
+
 ## 0.3.4
 
 - Übersicht neu geordnet: oben die Karte **„Jetzt“** mit Empfehlung, Begründung und „Strom kaufen: ja/nein“ sowie den Energieflüssen (PV, Haus, Akku, Netz); darunter Strompreis, PV heute und Grundverbrauch

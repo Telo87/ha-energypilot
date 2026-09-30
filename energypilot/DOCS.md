@@ -68,14 +68,28 @@ Jede Prognose wird für jede Stunde in zwei Varianten gespeichert:
 EnergyPilot baut aus allen Quellen eine eigene Prognose je Anlage:
 
 1. **Gewichtung:** Jede Quelle zählt umso mehr, je kleiner ihr Fehler bei dieser Anlage in den letzten
-   30 Tagen war – getrennt nach erwarteter Wetterlage, denn manche Modelle sind bei Sonne gut und
-   bei wechselhaftem Wetter schwach.
-2. **Korrektur nach Uhrzeit:** ein gelernter Faktor je Stunde, der erfasst, was kein Wettermodell weiß –
-   Schatten am Morgen, Abregelung am Mittag, Verschmutzung.
+   30 Tagen war – getrennt nach erwarteter Wetterlage.
+2. **Korrektur je Uhrzeit, getrennt für Sonne und Wolken:** Schatten von Bäumen oder Nachbarhäusern
+   wirkt nur bei direkter Sonne; systematische Fehler der Wettermodelle zeigen sich auch bei Bewölkung.
+3. **Spanne (P10–P90):** aus der Verteilung der bisherigen Fehler in derselben Wetterlage – in 8 von 10
+   Stunden liegt die Erzeugung innerhalb des grauen Bandes.
 
 Gelernt wird **jede Stunde neu** und rückwirkend Tag für Tag nur aus den Tagen davor. Im Prognose-Check
-tritt sie daher fair gegen die Wetterdienste an. Die Sensoren verwenden automatisch die genaueste Quelle
-der letzten 30 Tage – also die eigene Prognose, sobald sie besser ist.
+tritt sie daher fair gegen die Wetterdienste an.
+
+### Live-Korrektur
+
+Die gemessene PV-Leistung der letzten Stunde wird mit der Prognose verglichen. Die Abweichung korrigiert
+die laufende Stunde (40 %), die nächste (20 %) und die übernächste (10 %). Stärkere Gewichte reagieren an
+echten Daten zu sehr auf einzelne Wolken und machen die Prognose schlechter. Im Prognose-Check erscheint
+sie unter „Kurzfristig“ als „EnergyPilot (live korrigiert)“; der Planer rechnet damit.
+
+### Ausrichtung prüfen
+
+Unter Einstellungen › PV-Anlagen berechnet „Ausrichtung prüfen“ aus den klaren Stunden (Sonnenhöhe über
+20°), welche Ausrichtung und Neigung am besten zur gemessenen Tageskurve passen – verglichen wird nur die
+Form, nicht die Höhe. Eine falsch eingetragene Ausrichtung macht alle Wetterdienst-Prognosen ungenauer;
+der Vorschlag lässt sich mit einem Klick übernehmen.
 
 ## Verbrauchsprognose
 
@@ -101,6 +115,10 @@ Grundlage sind die genaueste PV-Prognose, die Verbrauchsprognose (ohne E-Auto un
 aktuelle Ladezustand, die Akku-Daten (Einstellungen › Batterie) und die Strompreise. Energie, die am
 Ende noch im Akku ist, wird mit einem vorsichtigen Preis bewertet, damit der Plan den Akku nicht
 künstlich leerfährt. Umgeschaltet wird nur, wenn es über den ganzen Zeitraum mindestens 1 ct spart.
+
+Mit dem **Sicherheitsabschlag** (Einstellungen › Batterie) rechnet der Planer bei unsicherer
+PV-Prognose mit weniger Sonne („Vorsichtig“ = untere Grenze der Spanne). So bleibt der Akku eher für den
+Abend gefüllt, wenn der Tag trüber wird als erwartet.
 
 Die **Reichweite** zeigt, wie lange der Akku beim aktuellen Hausverbrauch bis zur Reserve reicht, und
 wann er laut Prognose (mit PV-Erzeugung) leer bzw. wieder voll ist.

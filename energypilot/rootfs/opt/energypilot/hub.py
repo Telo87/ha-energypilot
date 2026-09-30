@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 
-from . import __version__, analysis, learn, planner
+from . import __version__, analysis, geometry, learn, planner
 from .config import OPEN_METEO_MODELS, Options, Settings, to_array
 from .db import Database
 from .ha import HAError, HomeAssistant
@@ -35,6 +35,7 @@ def source_label(key: str) -> str:
         "fs": "Forecast.Solar",
         "sc": "Solcast",
         learn.PV_SOURCE: "EnergyPilot (lernend)",
+        learn.NOWCAST_SOURCE: "EnergyPilot (live korrigiert)",
         learn.NAIVE_SOURCE: "Wie vor einer Woche",
     }.get(key, key)
 
@@ -60,6 +61,8 @@ class Hub:
         self._midnight: dict[str, int] = {}
         self.model_info: dict[str, dict] = {}
         self.plan: dict = {"ok": False, "reason": "Wird berechnet …"}
+        self._pv_samples: deque[tuple[float, float]] = deque(maxlen=1200)  # (time, total PV W)
+        self.nowcast: dict | None = None
         self._plan_at = 0.0
 
     # ------------------------------------------------------------------ basics
@@ -432,6 +435,34 @@ class Hub:
                     self.mark(f"act:{sid}", True, count=len(stats.get(sid, [])))
         self.mark("actual", True, count=total)
 
+    # ---------------------------------------------------------------- geometry
+    def check_geometry(self, array_id: str) -> dict:
+        """Which orientation fits the measured production best (see geometry.py)."""
+        cfg = next((c for c in self.settings.arrays if c["id"] == array_id), None)
+        if not cfg:
+            return {"ok": False, "reason": "Anlage nicht gefunden."}
+        if not cfg.get("sensor") or not cfg["planes"]:
+            return {"ok": False, "reason": "Die Anlage braucht einen Messsensor und mindestens eine Teilfläche."}
+        loc = self.location
+        if not loc:
+            return {"ok": False, "reason": "Standort unbekannt."}
+        models = list(dict.fromkeys(["best_match", *self.settings.data["sources"]["models"]]))
+        by_model: dict[str, list[tuple]] = defaultdict(list)
+        for model, target, horizon, ghi, dhi, temp, _issued in self.db.weather(models):
+            if horizon == "d0" and ghi is not None:
+                by_model[model].append((target, ghi, dhi, temp))
+        model = next((m for m in models if len(by_model.get(m, [])) >= 200), None)
+        if not model:
+            return {"ok": False, "reason": "Noch zu wenige Wetterdaten – das Archiv wird nach dem Start im Hintergrund geladen."}
+        weather = sorted(by_model[model])
+        actual = {t: wh for _s, t, wh in self.db.actuals(weather[0][0], weather[-1][0] + 3600, array_id)}
+        res = geometry.fit(to_array(cfg), weather, actual, *loc)
+        res["model"] = source_label(f"om:{model}")
+        res["efficiency"] = cfg["efficiency"]
+        if res.get("ok"):
+            res["implied_efficiency"] = round(cfg["efficiency"] * res["scale"], 3)
+        return res
+
     # ---------------------------------------------------------------- learning
     async def run_learning(self) -> None:
         try:
@@ -528,13 +559,16 @@ class Hub:
                             learn.PVHour(t, local[t].hour, analysis._clear(t, arr, lat, lon),
                                          None if act is None else max(0.0, act), dict(fc))
                         )
-                    pred, model = learn.pv_walk_forward(days, by_day)
-                    rows += [(learn.PV_SOURCE, cfg["id"], t, horizon, round(v, 1), 0) for t, v in pred.items()]
+                    res = learn.pv_walk_forward(days, by_day)
+                    for src, values in ((learn.PV_SOURCE, res.forecast), (learn.BAND_LO, res.lo), (learn.BAND_HI, res.hi)):
+                        rows += [(src, cfg["id"], t, horizon, round(v, 1), 0) for t, v in values.items()]
+                    model = res.model
                     if horizon == "d1" and model is not None:
                         info[cfg["id"]] = {
                             "days": model.days,
                             "weights": {k: round(v, 3) for k, v in model.weight_share().items()},
-                            "factors": {h: round(f, 3) for h, f in sorted(model.factor.items())},
+                            "factors": model.hour_factors(),
+                            "band": {b: [round(x, 3) for x in v] for b, v in model.band.items()},
                         }
         base = self.base_load(acts)
         # rebuild the stored base load completely: rows from an earlier sensor setup must not stay behind
@@ -578,16 +612,23 @@ class Hub:
                 load[t] = wh
         # take the most accurate source; hours it does not cover come from Open-Meteo Auto
         order = [x for x in (best, learn.PV_SOURCE, "om:best_match") if x]
+        caution = float(self.settings.data["battery"].get("pv_caution", 0))
         profile = self.load_profile() if len(load) < (end - start) // 3600 else {}
         out = []
         for t in range(start, end, 3600):
             frac = 1 - (now - t) / 3600 if t == start else 1.0
             src = next((x for x in order if count[x].get(t) == len(ids)), None)
             pv_wh = pv[src][t] if src else 0.0
+            if src == learn.PV_SOURCE and caution and count[learn.BAND_LO].get(t) == len(ids):
+                pv_wh -= caution * max(0.0, pv_wh - pv[learn.BAND_LO][t])  # towards the pessimistic P10
             load_wh = load.get(t)
             if load_wh is None:
                 load_wh = profile.get(datetime.fromtimestamp(t, self.tz).hour, 400.0)
             out.append({"t": t, "frac": frac, "pv": pv_wh / 1000 * frac, "load": load_wh / 1000 * frac})
+        f = (self.nowcast or {}).get("factor")
+        if f:  # the next hours follow what the panels deliver right now
+            for i, e in enumerate(out[: len(learn.NOWCAST_WEIGHTS)]):
+                e["pv"] *= 1 + (f - 1) * learn.NOWCAST_WEIGHTS[i]
         return out, best, "Verbrauchsprognose" if load else "Durchschnitt der letzten 14 Tage"
 
     def load_profile(self) -> dict[int, float]:
@@ -687,10 +728,13 @@ class Hub:
             "savings_eur": round(plan.savings / 100, 2),
             "horizon_end": steps[-1]["ts"] + 3600,
             "first_fraction": hours[0].fraction,
+            "nowcast": self.nowcast,
         }
 
     async def update_plan(self) -> None:
         try:
+            self.nowcast = await asyncio.to_thread(self.compute_nowcast)
+            await asyncio.to_thread(self.write_nowcast)
             self.plan = await asyncio.to_thread(self.compute_plan)
             self.log_plan()
         except Exception as err:
@@ -874,6 +918,42 @@ class Hub:
             if self.settings.data["invert"].get(key) and values[key]["value"] is not None:
                 values[key]["value"] = -values[key]["value"]
         self.live = {"at": int(time.time()), "values": values}
+        self.sample_pv()
+
+    def sample_pv(self) -> None:
+        """Remember the total PV power for the short-term correction (all measured arrays)."""
+        ids = [c["id"] for c in self.settings.arrays if c["kwp"] > 0 and c.get("sensor")]
+        vals = [(self.live.get("values", {}).get(f"pv:{i}") or {}).get("value") for i in ids]
+        if ids and all(v is not None for v in vals):
+            self._pv_samples.append((time.time(), max(0.0, sum(vals))))
+
+    def compute_nowcast(self) -> dict | None:
+        """Measured PV power of the last hour against the own forecast for it."""
+        now = time.time()
+        win = [(t, w) for t, w in self._pv_samples if t >= now - 3600]
+        if len(win) < 20 or now - win[0][0] < 1800:
+            return None
+        ids = [c["id"] for c in self.settings.arrays if c["kwp"] > 0 and c.get("sensor")]
+        fc: dict[int, float] = defaultdict(float)
+        for source, arr, t, wh in self.db.forecasts(int(win[0][0]) // 3600 * 3600, int(now) + 1, "d0"):
+            if source == learn.PV_SOURCE and arr in ids:
+                fc[t] += wh  # Wh of an hour = mean W in that hour
+        forecast_w = sum(fc.get(int(t) // 3600 * 3600, 0.0) for t, _w in win) / len(win)
+        actual_w = sum(w for _t, w in win) / len(win)
+        factor = learn.nowcast_factor(actual_w, forecast_w)
+        return {"factor": factor, "actual_w": round(actual_w), "forecast_w": round(forecast_w), "at": int(now)}
+
+    def write_nowcast(self) -> None:
+        """Store the corrected forecast of the next hours as its own source (for the accuracy check)."""
+        now = int(time.time())
+        hour = now // 3600 * 3600
+        f = (self.nowcast or {}).get("factor") or 1.0
+        rows = []
+        for source, arr, t, wh in self.db.forecasts(hour + 3600, hour + 3600 * len(learn.NOWCAST_WEIGHTS), "d0"):
+            if source == learn.PV_SOURCE:
+                w = learn.NOWCAST_WEIGHTS[(t - hour) // 3600]
+                rows.append((learn.NOWCAST_SOURCE, arr, t, "d0", round(wh * (1 + (f - 1) * w), 1), now))
+        self.db.put_forecast(rows)
 
     # ------------------------------------------------------------------- views
     def price_slots(self, start: int, end: int) -> list[dict]:
@@ -946,11 +1026,17 @@ class Hub:
                 complete[t] = complete.get(t, 0) + 1
         actual = [round(act[t]) if complete.get(t) == len(ids) else None for t in hours]
         fcs: dict[str, dict[str, list]] = {}
+        band: dict[str, dict[str, list]] = {}
         for horizon in ("d0", "d1"):
             per: dict[str, dict[int, list]] = {}
             for source, arr, t, wh in self.db.forecasts(start, end, horizon):
                 if arr in ids:
                     per.setdefault(source, {}).setdefault(t, []).append(wh)
+            for key, src in (("lo", learn.BAND_LO), ("hi", learn.BAND_HI)):
+                vals = per.pop(src, {})
+                band.setdefault(horizon, {})[key] = [
+                    round(sum(vals[t])) if len(vals.get(t, [])) == len(ids) else None for t in hours
+                ]
             for source, vals in per.items():
                 fcs.setdefault(source, {})[horizon] = [
                     round(sum(vals[t])) if len(vals.get(t, [])) == len(ids) else None for t in hours
@@ -960,6 +1046,7 @@ class Hub:
             "hours": hours,
             "actual": actual,
             "forecasts": fcs,
+            "band": band,
             "labels": {s: source_label(s) for s in fcs},
             "prices": self.price_slots(start, end),
         }
@@ -993,7 +1080,12 @@ class Hub:
         forecasts = [
             {"source": s, "label": source_label(s), **{k: round(v / 1000, 2) for k, v in v.items()}}
             for s, v in sorted(totals.items())
+            if s not in (learn.BAND_LO, learn.BAND_HI)
         ]
+        pv_range = {
+            day: [round(totals.get(learn.BAND_LO, {}).get(day, 0) / 1000, 1), round(totals.get(learn.BAND_HI, {}).get(day, 0) / 1000, 1)]
+            for day in ("today", "tomorrow")
+        } if learn.BAND_LO in totals else None
         return {
             "version": __version__,
             "demo": self.options.demo,
@@ -1010,6 +1102,7 @@ class Hub:
             "ranking": [r["source"] for r in accuracy],
             "accuracy": accuracy,
             "produced_kwh": round(produced / 1000, 2),
+            "pv_range": pv_range,
             "load": {k: round(v / 1000, 2) for k, v in load.items()} if any(load.values()) else None,
             "plan": {k: v for k, v in self.plan.items() if k not in ("steps", "energy")},
             "status": {k: {**v, "label": source_label(k) if not k.startswith("act:") else k[4:]} for k, v in self.status.items()},
