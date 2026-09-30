@@ -675,3 +675,28 @@ svg.i.flip { transform: scaleX(-1); }
 a.notice.setup-hint { margin-bottom: 16px; color: var(--text); text-decoration: none; background: var(--err-soft); }
 a.notice.setup-hint svg { color: var(--err); }
 a.notice.setup-hint:hover { filter: brightness(.97); }
+
+/* settings: sensors */
+.sens-page { max-width: 1040px; display: flex; flex-direction: column; gap: 16px; }
+.sens-page .sens-state:empty { display: none; }
+.sens-row { display: grid; grid-template-columns: minmax(170px, 260px) 1fr; gap: 6px 20px; padding: 12px 0; border-top: 1px solid var(--border); }
+.card-body > .sens-row:first-child { border-top: 0; padding-top: 0; }
+.sens-label .n { font-size: 13.5px; font-weight: 600; }
+.sens-label .h { font-size: 12.5px; color: var(--text-3); margin-top: 2px; }
+.sens-pick { min-width: 0; }
+.sens-dir { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; margin-top: 6px; }
+.sens-dir .dir-line { margin: 0; }
+.sens-dir .check.inv { margin: 0 0 0 auto; font-size: 12.5px; color: var(--text-2); }
+.sens-more { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 12px; }
+.sens-more summary { cursor: pointer; font-size: 13px; font-weight: 600; list-style: none; }
+.sens-more summary .faint { font-weight: 400; }
+.sens-more summary::-webkit-details-marker { display: none; }
+.sens-more summary svg { width: 15px; height: 15px; margin-right: 6px; vertical-align: -3px; transition: transform .15s; }
+.sens-more[open] summary svg { transform: rotate(90deg); }
+.sens-more[open] summary { margin-bottom: 10px; }
+.sens-more .sens-row:first-of-type { border-top: 0; }
+.savebar { position: sticky; bottom: 12px; z-index: 15; display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: 0 6px 20px rgba(15, 23, 42, .08); }
+.savebar > span { flex: 1; font-size: 13px; }
+.savebar.dirty { border-color: var(--accent); }
+.savebar.dirty > span { color: var(--text); font-weight: 600; }
+@media (max-width: 700px) { .sens-row { grid-template-columns: 1fr; } }

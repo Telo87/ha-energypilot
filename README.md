@@ -1,6 +1,6 @@
 # EnergyPilot – Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-0.5.2-blue)
+![Version](https://img.shields.io/badge/version-0.5.3-blue)
 
 Welche PV-Prognose stimmt bei **deinem** Dach? EnergyPilot sammelt stündlich die Prognosen mehrerer
 Wetterdienste, vergleicht sie mit der tatsächlichen Erzeugung jeder Anlage und zeigt dynamische

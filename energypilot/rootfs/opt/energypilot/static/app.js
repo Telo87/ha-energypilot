@@ -127,6 +127,8 @@
     cloud: '<path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 13 3 3 0 0 0 6 19z"/>',
     cloudSun: '<path d="M12 2v2M4.9 4.9l1.4 1.4M2 12h2M19.1 4.9l-1.4 1.4"/><path d="M15.9 9.7A4 4 0 0 0 8.2 10"/><path d="M17.5 21a3.5 3.5 0 1 0-1.1-6.8A4.5 4.5 0 0 0 8 16a2.5 2.5 0 0 0 .5 5z"/>',
     home: '<path d="m3 11 9-8 9 8"/><path d="M5 9.5V20h14V9.5"/>',
+    car: '<path d="M5 17H3v-5l2-5h14l2 5v5h-2"/><path d="M3 12h18"/><circle cx="7.5" cy="17" r="2"/><circle cx="16.5" cy="17" r="2"/><path d="M9.5 17h5"/>',
+    pin: '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
     battery: '<rect x="2" y="7" width="17" height="10" rx="2"/><path d="M22 11v2"/><path d="M6 10v4M10 10v4"/>',
     plug: '<path d="M9 2v6M15 2v6"/><path d="M6 8h12v4a6 6 0 0 1-12 0z"/><path d="M12 18v4"/>',
     zap: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
@@ -1401,40 +1403,57 @@
   }
 
   async function renderSensors(el) {
-    setHeader('Einstellungen', 'Sensoren für Live-Werte und spätere Optimierung');
+    setHeader('Einstellungen', 'Welche Sensoren EnergyPilot liest');
     let ents = [];
     try { ents = await loadEntities(true); } catch (e) { toast(`Sensoren konnten nicht geladen werden: ${e.message}`, 'err'); }
     const s = S.settings.sensors; const loc = S.settings.location; const ha = S.settings.ha_location;
     const inv = S.settings.invert || {};
-    const invBox = (key) => `<label class="check inv"><input type="checkbox" id="inv_${key}" ${inv[key] ? 'checked' : ''}>Richtung umkehren</label><div class="dir-line" id="dir_${key}"></div>`;
-    el.innerHTML = `<div class="grid cols-2">
-      <div class="card"><div class="card-head"><div class="avatar accent">${ic('sliders')}</div><h2>Sensoren</h2></div><div class="card-body">
-        <div class="field"><label>Hausverbrauch</label>${entityPicker('n_house', ents, s.house, ['power', 'energy'])}${invBox('house')}<span class="hint">Gesamtverbrauch des Hauses (inklusive E-Auto und Heizstab) – Grundlage der Verbrauchsprognose. Erwartet wird ein positiver Wert.</span></div>
-        <div class="field"><label>Netzleistung</label>${entityPicker('n_grid', ents, s.grid, ['power'])}${invBox('grid')}<span class="hint">Vom Smartmeter. EnergyPilot erwartet: positiv = Bezug, negativ = Einspeisung – sonst „Richtung umkehren“ anhaken.</span></div>
-        <div class="field"><label>Netzbezug <span class="faint">(optional)</span></label>${entityPicker('n_gin', ents, s.grid_import || '', ['power', 'energy'])}</div>
-        <div class="field"><label>Einspeisung <span class="faint">(optional)</span></label>${entityPicker('n_gout', ents, s.grid_export || '', ['power', 'energy'])}<span class="hint">Bezug und Einspeisung als eigene Sensoren sind für die Kostenübersicht genauer als die Netzleistung mit Vorzeichen – innerhalb einer Stunde heben sich Bezug und Einspeisung sonst gegenseitig auf. Viele Speicher und Smartmeter liefern beide Werte getrennt.</span></div>
-        <div class="field"><label>Batterie Ladezustand</label>${entityPicker('n_soc', ents, s.battery_soc, ['percent'])}</div>
-        <div class="field"><label>Batterie Leistung</label>${entityPicker('n_bp', ents, s.battery_power, ['power'])}${invBox('battery_power')}<span class="hint">EnergyPilot erwartet: positiv = Laden, negativ = Entladen. Manche Speicher melden es umgekehrt – dann „Richtung umkehren“ anhaken.</span></div>
-        <div class="field"><label>E-Auto / Wallbox</label>${entityPicker('n_ev', ents, s.ev || '', ['power', 'energy'])}<span class="hint">Ladeleistung oder Ladezähler der Wallbox</span></div>
-        <div class="field"><label>Heizstab</label>${entityPicker('n_heater', ents, s.heater || '', ['power', 'energy'])}<span class="hint">E-Auto und Heizstab werden vom Hausverbrauch abgezogen – die Verbrauchsprognose lernt nur den Grundverbrauch, die beiden plant EnergyPilot später gezielt.</span></div>
-      </div></div>
-      <div class="card"><div class="card-head"><div class="avatar accent">${ic('compass')}</div><h2>Standort</h2></div><div class="card-body">
-        <p class="explain">Standardmäßig wird der Standort aus Home Assistant verwendet${ha ? ` (${nf(ha[0], 3)}, ${nf(ha[1], 3)})` : ''}. Nur ausfüllen, wenn die Anlage woanders steht.</p>
-        <div class="form-grid"><div class="field"><label>Breitengrad</label><input class="input" id="n_lat" type="number" step="0.0001" value="${loc.latitude ?? ''}" placeholder="${ha ? ha[0] : ''}"></div>
-        <div class="field"><label>Längengrad</label><input class="input" id="n_lon" type="number" step="0.0001" value="${loc.longitude ?? ''}" placeholder="${ha ? ha[1] : ''}"></div></div>
-        <span class="hint faint" style="font-size:12px">Eine Änderung verwirft die gespeicherten Wetterdaten und lädt sie für den neuen Ort neu.</span>
-      </div></div></div>
-      <div class="row" style="margin-top:16px"><button class="btn primary" id="n_save">${ic('check')}Speichern</button></div>
-      <div class="card" style="margin-top:16px" id="consCheck"></div>`;
+    // key, input id, label, hint, kinds, required, has direction
+    const F = {
+      house: ['n_house', 'Hausverbrauch', 'Gesamter Verbrauch des Hauses, inklusive E-Auto und Heizstab', ['power', 'energy'], true, true],
+      grid: ['n_grid', 'Netzleistung', 'Vom Smartmeter: positiv = Bezug, negativ = Einspeisung', ['power'], true, true],
+      grid_import: ['n_gin', 'Netzbezug', '', ['power', 'energy'], false, false],
+      grid_export: ['n_gout', 'Einspeisung', '', ['power', 'energy'], false, false],
+      battery_soc: ['n_soc', 'Ladezustand', 'In Prozent', ['percent'], true, false],
+      battery_power: ['n_bp', 'Leistung', 'Positiv = Laden, negativ = Entladen', ['power'], true, true],
+      ev: ['n_ev', 'E-Auto / Wallbox', 'Ladeleistung oder Ladezähler', ['power', 'energy'], false, false],
+      heater: ['n_heater', 'Heizstab', 'Leistung oder Energiezähler', ['power', 'energy'], false, false],
+    };
+    const row = (key) => {
+      const [id, label, hint, kinds, req, dir] = F[key];
+      return `<div class="sens-row">
+        <div class="sens-label"><div class="n">${label}${req ? '' : ' <span class="faint">optional</span>'}</div>${hint ? `<div class="h">${hint}</div>` : ''}</div>
+        <div class="sens-pick">${entityPicker(id, ents, s[key] || '', kinds)}
+          ${dir ? `<div class="sens-dir" id="dirrow_${key}"><span class="dir-line" id="dir_${key}"></span><label class="check inv"><input type="checkbox" id="inv_${key}" ${inv[key] ? 'checked' : ''}>Richtung umkehren</label></div>` : ''}</div></div>`;
+    };
+    const section = (icon, title, sub, keys, body, foot = '') => `<div class="card sens-sec" data-keys="${keys.join(',')}">
+      <div class="card-head"><div class="avatar accent">${ic(icon)}</div><h2>${title}<div class="faint" style="font-weight:400;font-size:12.5px">${sub}</div></h2><span class="badge sens-state"></span></div>
+      <div class="card-body">${body}${foot}</div></div>`;
+    const locSet = loc.latitude != null && loc.latitude !== '' && loc.longitude != null && loc.longitude !== '';
+    el.innerHTML = `<div class="sens-page">
+      ${section('home', 'Haus', 'Grundlage der Verbrauchsprognose', ['house'], row('house'))}
+      ${section('zap', 'Stromnetz', 'Bezug und Einspeisung am Smartmeter', ['grid'], row('grid'),
+        `<details class="sens-more" ${s.grid_import || s.grid_export ? 'open' : ''}><summary>${ic('chevron')}Bezug und Einspeisung getrennt <span class="faint">– optional, genauer für die Kosten</span></summary>
+          <p class="explain">Mit der Netzleistung allein heben sich Bezug und Einspeisung innerhalb einer Stunde gegenseitig auf. Viele Speicher und Smartmeter liefern beide Werte getrennt.</p>
+          ${row('grid_import')}${row('grid_export')}</details>`)}
+      ${section('battery', 'Batterie', 'Für Planung und Reichweite', ['battery_soc', 'battery_power'], row('battery_soc') + row('battery_power'))}
+      ${section('car', 'Große Verbraucher', 'Werden vom Hausverbrauch abgezogen – die Prognose lernt nur den Grundverbrauch', ['ev', 'heater'], row('ev') + row('heater'))}
+      <div class="card sens-sec"><div class="card-head"><div class="avatar accent">${ic('pin')}</div><h2>Standort<div class="faint" style="font-weight:400;font-size:12.5px" id="locSub">${locSet ? `Eigener Standort (${nf(+loc.latitude, 3)}, ${nf(+loc.longitude, 3)})` : `Aus Home Assistant${ha ? ` (${nf(ha[0], 3)}, ${nf(ha[1], 3)})` : ''}`}</div></h2>
+        <button class="btn sm" id="locToggle">${locSet ? 'Ändern' : 'Abweichend eintragen'}</button></div>
+        <div class="card-body ${locSet ? '' : 'hidden'}" id="locBody">
+          <div class="form-grid"><div class="field"><label>Breitengrad</label><input class="input" id="n_lat" type="number" step="0.0001" value="${loc.latitude ?? ''}" placeholder="${ha ? ha[0] : ''}"></div>
+          <div class="field"><label>Längengrad</label><input class="input" id="n_lon" type="number" step="0.0001" value="${loc.longitude ?? ''}" placeholder="${ha ? ha[1] : ''}"></div></div>
+          <span class="hint faint" style="font-size:12px">Nur nötig, wenn die Anlage nicht am Home-Assistant-Standort steht. Leer lassen = Standort aus Home Assistant. Eine Änderung lädt die Wetterdaten für den neuen Ort neu.</span></div></div>
+      <div class="savebar" id="saveBar"><span class="muted" id="saveMsg">Alles gespeichert</span><button class="btn" id="n_reset" disabled>Verwerfen</button><button class="btn primary" id="n_save" disabled>${ic('check')}Speichern</button></div>
+      <div class="card" id="consCheck"></div></div>`;
     bindPickers(el, ents);
     // what EnergyPilot makes of the current value – updates when the entity or the checkbox changes
-    const DIR = { house: 'n_house', grid: 'n_grid', battery_power: 'n_bp' };
     const watts = (e) => { const v = parseFloat(e.state); if (!Number.isFinite(v)) return null; return e.unit === 'kW' ? v * 1000 : e.unit === 'MW' ? v * 1e6 : v; };
     const explain = (key) => {
-      const line = $(`#dir_${key}`); const id = $(`#${DIR[key]}`).value;
+      const line = $(`#dir_${key}`); const id = $(`#${F[key][0]}`).value;
       const e = ents.find((x) => x.entity_id === id);
       const box = $(`#inv_${key}`);
-      box.closest('.inv').classList.toggle('hidden', !id);
+      $(`#dirrow_${key}`).classList.toggle('hidden', !id);
       if (!e || e.kind !== 'power') { line.innerHTML = ''; return; }
       let w = watts(e);
       if (w == null) { line.innerHTML = '<span class="faint">kein aktueller Wert</span>'; return; }
@@ -1443,19 +1462,46 @@
       const txt = key === 'grid' ? (w > 20 ? `Netzbezug ${a}` : w < -20 ? `Einspeisung ${a}` : 'ausgeglichen')
         : key === 'battery_power' ? (w > 20 ? `Batterie lädt mit ${a}` : w < -20 ? `Batterie entlädt mit ${a}` : 'Batterie im Ruhezustand')
           : (w >= 0 ? `Hausverbrauch ${a}` : `<span class="pos">negativer Verbrauch (${fmtW(w)}) – Richtung umkehren?</span>`);
-      line.innerHTML = `→ EnergyPilot versteht: <b>${txt}</b>`;
+      line.innerHTML = `EnergyPilot versteht: <b>${txt}</b>`;
     };
-    Object.keys(DIR).forEach((key) => {
-      $(`#inv_${key}`).addEventListener('change', () => explain(key));
-      $(`#${DIR[key]}`).addEventListener('change', () => explain(key));
+    // badge per section: all required set / missing / optional
+    const states = () => $$('.sens-sec[data-keys]', el).forEach((sec) => {
+      const keys = sec.dataset.keys.split(',');
+      const set = keys.filter((k) => $(`#${F[k][0]}`).value).length;
+      const req = keys.some((k) => F[k][4]);
+      const b = sec.querySelector('.sens-state');
+      b.className = `badge sens-state ${set === keys.length ? 'ok' : req ? 'err' : ''}`;
+      b.textContent = set === keys.length ? 'eingerichtet' : req ? (set ? `${set} von ${keys.length}` : 'fehlt') : (set ? `${set} von ${keys.length}` : 'optional');
+    });
+    const values = () => ({
+      sensors: Object.fromEntries(Object.entries(F).map(([k, f]) => [k, $(`#${f[0]}`).value])),
+      location: { latitude: $('#n_lat').value, longitude: $('#n_lon').value },
+      invert: Object.fromEntries(Object.keys(F).filter((k) => F[k][5]).map((k) => [k, $(`#inv_${k}`).checked])),
+    });
+    let saved = JSON.stringify(values());
+    const dirty = () => {
+      const d = JSON.stringify(values()) !== saved;
+      $('#saveBar').classList.toggle('dirty', d);
+      $('#saveMsg').textContent = d ? 'Nicht gespeichert' : 'Alles gespeichert';
+      $('#n_save').disabled = !d; $('#n_reset').disabled = !d;
+      states();
+    };
+    Object.keys(F).forEach((key) => {
+      $(`#${F[key][0]}`).addEventListener('change', dirty);
+      if (!F[key][5]) return;
+      $(`#inv_${key}`).addEventListener('change', () => { explain(key); dirty(); });
+      $(`#${F[key][0]}`).addEventListener('change', () => explain(key));
       explain(key);
     });
+    ['n_lat', 'n_lon'].forEach((id) => $(`#${id}`).addEventListener('input', dirty));
+    $('#locToggle').addEventListener('click', () => { const b = $('#locBody'); b.classList.toggle('hidden'); if (!b.classList.contains('hidden')) $('#n_lat').focus(); });
+    states();
     consumptionCheck($('#consCheck'));
-    $('#n_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({
-      sensors: { house: $('#n_house').value, grid: $('#n_grid').value, battery_soc: $('#n_soc').value, battery_power: $('#n_bp').value, ev: $('#n_ev').value, heater: $('#n_heater').value, grid_import: $('#n_gin').value, grid_export: $('#n_gout').value },
-      location: { latitude: $('#n_lat').value, longitude: $('#n_lon').value },
-      invert: { house: $('#inv_house').checked, grid: $('#inv_grid').checked, battery_power: $('#inv_battery_power').checked },
-    })));
+    $('#n_reset').addEventListener('click', () => navigate());
+    $('#n_save').addEventListener('click', (e) => withBusy(e.currentTarget, async () => {
+      const v = values();
+      if (await saveSettings(v)) { saved = JSON.stringify(v); dirty(); consumptionCheck($('#consCheck')); }
+    }));
   }
 
   function renderLook(el) {

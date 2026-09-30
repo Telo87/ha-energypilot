@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.3
+
+- Einstellungen → Sensoren & Standort neu aufgebaut: Gruppen für Haus, Stromnetz, Batterie und große Verbraucher, je mit Status („eingerichtet“, „fehlt“, „optional“)
+- Kürzere Hinweise direkt neben jedem Sensor; getrennter Netzbezug/Einspeisung als aufklappbare Option
+- Standort eingeklappt – nur nötig, wenn er vom Home-Assistant-Standort abweicht
+- Speicherleiste bleibt sichtbar und zeigt ungespeicherte Änderungen an
+
 ## 0.5.2
 
 - Behoben (Protokoll): Nachtstunden wurden nicht ausgewertet, weil Wechselrichter nachts abschalten und ihr Sensor dann keinen Wert liefert – bei Sonne unter dem Horizont zählt die Erzeugung jetzt als 0
