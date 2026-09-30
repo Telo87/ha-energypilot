@@ -513,8 +513,9 @@
       const flows = [
         flowNode('solar', 'warn', 'PV-Erzeugung', wv('pv', pvNow), pvVals.length ? `${ov.arrays.map((a) => { const x = lv[`pv:${a.id}`]; return `${esc(a.name)} ${x && x.unit === 'W' ? fmtW(x.value) : x && x.value != null ? 'Zähler' : '–'}`; }).join(' · ')}${nowcastText(plan)}` : missing()),
         flowNode('home', '', 'Hausverbrauch', wv('house', val('house')), lv.house ? (ov.load ? `Grundverbrauch heute ~${nf(ov.load.today, 1)} kWh` : 'aktuell') : missing()),
-        flowNode('battery', 'ok', 'Akku', soc == null ? '–' : `${cnt('soc', nf(soc, 0))}<small>%</small>`, `${bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'}${rt ? ` · ${rt.empty_at ? `reicht bis ${fmtWhen(rt.empty_at)}` : rt.until ? `reicht über ${fmtWhen(rt.until, true)} hinaus` : ''}` : ''}`),
-        flowNode('plug', grid != null && grid < 0 ? 'ok' : '', grid != null && grid < 0 ? 'Einspeisung' : 'Netzbezug', wv('grid', grid == null ? null : Math.abs(grid)), lv.grid ? (grid > 20 ? 'Strom wird gekauft' : grid < -20 ? 'Überschuss geht ins Netz' : 'ausgeglichen') : missing()),
+        flowNode('battery', 'ok', 'Akku', soc == null ? '–' : `${cnt('soc', nf(soc, 0))}<small>%</small>`, `${bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'}${rt && (rt.empty_at || rt.until) ? ` · Prognose: ${rt.empty_at ? `leer ${fmtWhen(rt.empty_at).replace(' ', ' um ')}` : `reicht über ${fmtWhen(rt.until, true)} hinaus`}` : ''}`),
+        // like the battery card: the title names the device, the line below says which way the power flows
+        flowNode('plug', grid != null && grid < -20 ? 'ok' : '', 'Netz', wv('grid', grid == null ? null : Math.abs(grid)), lv.grid ? (grid > 20 ? '<b>Netzbezug</b> – Strom wird gekauft' : grid < -20 ? '<b>Einspeisung</b> – Überschuss geht ins Netz' : 'ausgeglichen – kein Bezug, keine Einspeisung') : missing()),
       ].join('');
       const nowCard = `<div class="card now-card"><div class="card-body now-grid">${decision}<div class="flow-grid">${flows}</div></div></div>`;
       const kpis = [

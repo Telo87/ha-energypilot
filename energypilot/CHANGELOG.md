@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+
+- Übersicht, Karte Akku: Die Vorhersage ist als solche gekennzeichnet – „lädt mit 302 W · Prognose: leer morgen um 08:47“ statt „reicht bis morgen 08:47“, sonst „Prognose: reicht über … hinaus“
+- Übersicht, Karte Netz: Wie beim Akku steht unter dem Wert die Richtung – „Netzbezug – Strom wird gekauft“, „Einspeisung – Überschuss geht ins Netz“ oder „ausgeglichen“
+
 ## 0.7.0
 
 - Lizenz: ab dieser Version PolyForm Strict 1.0.0 (nicht-kommerzielle Nutzung erlaubt, keine Weitergabe oder Veränderung); bis 0.6.4 MIT
