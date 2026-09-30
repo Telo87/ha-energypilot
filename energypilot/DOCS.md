@@ -119,8 +119,11 @@ Heizstab sind steuerbar und werden später gezielt eingeplant. Vergleichsmaßsta
 ## Planung
 
 Die Seite **Planung** rechnet alle 5 Minuten den günstigsten Fahrplan für den Heimspeicher bis zum Ende
-der bekannten Strompreise (die Preise für morgen erscheinen gegen 13 Uhr). Für jede Stunde gibt es drei
-Möglichkeiten:
+der bekannten Strompreise (die Preise für morgen erscheinen gegen 13 Uhr). **„Warum dieser Plan?“** erklärt
+jede Entscheidung aus dem aktuellen Plan: was ohne Eingriff passieren würde (wann der Akku leer wäre und was
+Netzstrom danach kostet), für welche Stunden gehaltene oder gekaufte Energie aufgehoben wird und was das je
+kWh bringt – oder, wenn der Akku im Eigenverbrauch bleibt, warum sich kein Eingriff lohnt. Im Stundenplan
+steht die Begründung beim Überfahren einer Stunde. Für jede Stunde gibt es drei Möglichkeiten:
 
 | Modus | Bedeutung |
 |---|---|

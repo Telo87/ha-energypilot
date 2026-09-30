@@ -459,3 +459,32 @@ def test_setup_check_accepts_sleeping_inverters(tmp_path):
     pv = next(g for g in rep["groups"] if g["key"] == "arrays")["checks"]
     assert not any(c["level"] == "warn" and "nicht verfügbar" in c["title"] for c in pv)
     assert any("keine Sonne" in c["text"] for c in pv)
+
+
+def test_explanation_traces_held_energy_to_the_expensive_hours():
+    from energypilot import explain
+    from energypilot.planner import simulate
+
+    b = Battery(grid_charge=False)
+    hours = day([20.0] * 3 + [60.0] * 3, load=1.5)
+    plan = optimize(hours, 1.1 + 2.0, b, feed_in=8)
+    why = explain.explain(hours, plan, simulate(hours, 1.1 + 2.0, b, 8), b)
+    hold = next(i for i in why["items"] if i["mode"] == "hold")
+    assert hold["price_now"] == 20.0 and hold["price_use"] == 60.0 and hold["use_start"] >= 3 * 3600
+    assert hold["gain_ct_per_kwh"] == 40.0
+    assert why["reason"] == "plan" and why["baseline"]["empty_at"] is not None
+
+
+def test_explanation_without_intervention():
+    from energypilot import explain
+    from energypilot.planner import simulate
+
+    b = Battery()
+    hours = day([30.0] * 6, load=0.5)  # full battery, flat prices: nothing to gain
+    plan = optimize(hours, 11.0, b, feed_in=8)
+    why = explain.explain(hours, plan, simulate(hours, 11.0, b, 8), b)
+    assert why["items"] == [] and why["reason"] == "enough"
+    charge = optimize(day([15.0] * 4 + [50.0] * 6), 1.1, b, feed_in=8)
+    why = explain.explain(day([15.0] * 4 + [50.0] * 6), charge, simulate(day([15.0] * 4 + [50.0] * 6), 1.1, b, 8), b)
+    item = next(i for i in why["items"] if i["mode"] == "charge")
+    assert item["energy_kwh"] > 0.2 and item["price_use"] == 50.0 and item["gain_ct_per_kwh"] == round(50 * 0.92 - 15, 1)

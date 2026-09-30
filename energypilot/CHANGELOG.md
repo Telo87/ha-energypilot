@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+
+- Planung: neuer Knopf **„Warum dieser Plan?“** (auch „Warum?“ in der Übersicht). Die Erklärung wird aus dem aktuellen Plan berechnet: wann der Akku ohne Eingriff leer wäre und was Netzstrom danach kostet; für jede Phase „Akku halten“ bzw. „Aus dem Netz laden“ Uhrzeit, Preis, Menge, für welche Stunden die Energie aufgehoben wird (Vergleich mit dem Akku ohne Eingriff) und der Vorteil je kWh nach Verlusten; eine Nacht mit einzelnen kurzen Entladestunden erscheint als eine Phase. Bleibt der Akku im Eigenverbrauch, steht dort der Grund. Dazu die Regeln des Planers mit den eigenen Einstellungen
+- Planung, Stundenplan: Beim Überfahren von „Akku halten“ oder „Aus dem Netz laden“ erscheint die Begründung
+
 ## 0.7.3
 
 - Menü: Bei „Einrichtung“ steht die Anzahl der Probleme (rot) bzw. – wenn es keine gibt – der Hinweise (orange). Die Prüfung läuft beim Öffnen und alle 10 Minuten, der Hinweis ist also auf jeder Seite sichtbar

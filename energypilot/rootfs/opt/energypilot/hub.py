@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 
-from . import __version__, analysis, geometry, learn, planner
+from . import __version__, analysis, explain, geometry, learn, planner
 from .config import OPEN_METEO_MODELS, Options, Settings, to_array
 from .db import Database
 from .ha import HAError, HomeAssistant
@@ -1025,6 +1025,7 @@ class Hub:
             return {**base, "ok": False, "reason": "Noch keine Strompreise für die nächsten Stunden."}
         feed_in = self.feed_in_avg()
         plan = planner.optimize(hours, soc_kwh, b, feed_in)
+        why = explain.explain(hours, plan, planner.simulate(hours, soc_kwh, b, feed_in), b)
         cap = b.capacity_kwh
         steps = [
             {
@@ -1052,6 +1053,7 @@ class Hub:
             "horizon_end": steps[-1]["ts"] + 3600,
             "first_fraction": hours[0].fraction,
             "nowcast": self.nowcast,
+            "why": why,
         }
 
     async def update_plan(self) -> None:

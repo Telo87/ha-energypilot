@@ -519,7 +519,7 @@
           <div class="now-kicker">Empfehlung jetzt</div>
           <div class="now-title"><span class="avatar ${m[2]}">${ic(m[1])}</span>${esc(plan.label)}</div>
           <p class="muted">${esc(plan.text)}</p>
-          <div class="row wrap" style="gap:8px"><span class="badge ${plan.buy_now ? 'accent' : ''}">Strom kaufen: ${plan.buy_now ? 'ja' : 'nein'}</span><a class="btn sm" href="#/plan">${ic('battery')}Zur Planung</a></div></div>`
+          <div class="row wrap" style="gap:8px"><span class="badge ${plan.buy_now ? 'accent' : ''}">Strom kaufen: ${plan.buy_now ? 'ja' : 'nein'}</span><a class="btn sm" href="#/plan">${ic('battery')}Zur Planung</a><a class="btn sm" href="#/plan?why=1">${ic('info')}Warum?</a></div></div>`
         : `<div class="now-decision"><div class="now-kicker">Empfehlung jetzt</div><div class="now-title">Noch kein Plan</div><p class="muted">${esc((plan && plan.reason) || 'Wird berechnet …')}</p></div>`;
       const flows = [
         flowNode('solar', 'warn', 'PV-Erzeugung', wv('pv', pvNow), pvVals.length ? `${allAsleep && !pvVals.some((v) => v > 0) ? 'Wechselrichter aus – keine Sonne' : ov.arrays.map((a) => { const x = lv[`pv:${a.id}`]; const w = pvW(a); return `${esc(a.name)} ${w != null ? fmtW(w) : x && x.value != null ? 'Zähler' : '–'}`; }).join(' · ')}${nowcastText(plan)}` : missing()),
@@ -613,6 +613,65 @@
   }
 
   // ------------------------------------------------------------------- plan
+  // "Warum dieser Plan?" - built from the plan itself (see explain.py)
+  // "heute 14:00–16:00", over midnight "heute 22:00 – morgen 06:00"
+  const span = (a, e) => (localDay(new Date(a * 1000)) === localDay(new Date((e - 1) * 1000))
+    ? `${fmtWhen(a)}–${new Date(e * 1000).getHours() === 0 ? '24:00' : fmtHour(e)}` : `${fmtWhen(a)} – ${fmtWhen(e, true)}`);
+  function whyItem(i, b) {
+    const use = i.use_start ? `für <b>${span(i.use_start, i.use_end)}</b> aufgehoben, wenn Netzstrom Ø ${ctkwh(i.price_use)} kostet (bis ${ctkwh(i.price_use_max)})` : null;
+    if (i.mode === 'charge') {
+      return `<b>${span(i.start, i.end)}: Aus dem Netz laden</b> – ${kwh(i.energy_kwh)} zu Ø ${ctkwh(i.price_now)}, danach steht der Akku bei ${nf(i.soc_end, 0)} %. `
+        + (use ? `Die Energie wird ${use}. Nach ${nf(100 - b.efficiency * 100, 0)} % Lade- und Entladeverlusten bleiben je gekaufter kWh etwa <b>${nf(i.gain_ct_per_kwh, 1)} ct</b> Vorteil.`
+          : 'Sie steht bis zum Ende des Planungszeitraums bereit – der Plan bewertet die Restenergie im Akku mit einem vorsichtigen Preis.');
+    }
+    const gaps = i.gaps && i.gaps.length ? ` In ${i.gaps.length === 1 ? 'einer Stunde' : `${i.gaps.length} Stunden`} dazwischen (${i.gaps.map((g) => fmtHour(g)).join(', ')}) entlädt er trotzdem kurz – der Vorrat reicht dafür, und die Preise unterscheiden sich in dieser Zeit kaum.` : '';
+    return `<b>${span(i.start, i.end)}: Akku halten</b> – Netzstrom kostet in dieser Zeit Ø ${ctkwh(i.price_now)}. Statt den Akku zu leeren, kommen die ${kwh(i.energy_kwh)} für den Verbrauch aus dem Netz. `
+      + (use ? `Die Energie im Akku wird ${use}${i.gain_ct_per_kwh != null ? ` – Vorteil etwa <b>${nf(i.gain_ct_per_kwh, 1)} ct je kWh</b>` : ''}.` : 'Die Energie im Akku bleibt für das Ende des Planungszeitraums.') + gaps;
+  }
+  function whyShort(p, st) {  // one line for the hour table
+    const i = ((p.why || {}).items || []).find((x) => st.ts >= x.start && st.ts < x.end);
+    if (!i || st.mode !== i.mode) return i ? 'Kurz entladen – der Vorrat reicht dafür, die Preise unterscheiden sich in dieser Zeit kaum' : '';
+    if (!i.use_start) return '';
+    return i.mode === 'charge' ? `Günstig laden (Ø ${nf(i.price_now, 1)} ct) für ${span(i.use_start, i.use_end)} (Ø ${nf(i.price_use, 1)} ct)`
+      : `Akku für ${span(i.use_start, i.use_end)} aufheben (Ø ${nf(i.price_use, 1)} statt ${nf(i.price_now, 1)} ct)`;
+  }
+  function planWhy(p) {
+    const w = p.why || {}; const base = w.baseline || {}; const b = p.battery;
+    const items = w.items || [];
+    const noPlan = base.empty_at
+      ? `Ohne Eingriff wäre der Akku <b>${fmtWhen(base.empty_at).replace(' ', ' um ')}</b> auf der Reserve von ${nf(b.min_soc, 0)} %${base.price_after != null ? `; danach würde Netzstrom für Ø ${ctkwh(base.price_after)} (bis ${ctkwh(base.price_after_max)}) gekauft` : ''}.`
+      : `Ohne Eingriff reicht der Akku laut Prognose bis zum Ende des Planungszeitraums (${fmtWhen(p.horizon_end, true)}).`;
+    let reason = '';
+    if (!items.length) {
+      reason = w.reason === 'enough' ? 'Deshalb gibt es nichts zu verschieben: In keiner Stunde fehlt der Akku. Halten würde nur Netzstrom kaufen, ohne später etwas zu sparen.'
+        : w.reason === 'expensive_first' ? `Der Akku wird ohnehin in den teureren Stunden entladen (dort Ø ${ctkwh(base.price_before)}); danach ist Netzstrom mit Ø ${ctkwh(base.price_after)} nicht teurer. Halten würde teuren gegen billigeren Strom tauschen.`
+          : `Vorher kostet Netzstrom Ø ${ctkwh(base.price_before)}, danach Ø ${ctkwh(base.price_after)}. Halten oder Laden brächte im ganzen Zeitraum weniger als ${nf(w.min_savings_ct, 0)} ct – dafür lohnt kein Eingriff.`;
+      if (base.empty_at && base.price_after_max != null) {
+        reason += b.grid_charge
+          ? ` Laden aus dem Netz lohnt sich nicht: Selbst der günstigste Preis (${ctkwh(base.cheapest_price)} ${fmtWhen(base.cheapest_at).replace(' ', ' um ')}) wird durch die Verluste zu ${ctkwh(base.charge_cost)} je kWh aus dem Akku – ${base.charge_cost >= base.price_after_max ? 'teurer als' : 'kaum günstiger als'} der Netzstrom später (bis ${ctkwh(base.price_after_max)}).`
+          : ' Laden aus dem Netz ist in den Einstellungen ausgeschaltet.';
+      }
+    }
+    const caution = { 0: 'aus', 0.5: 'mittel', 1: 'vorsichtig' }[Number(b.pv_caution ?? 0.5)] || 'mittel';
+    modal({
+      title: 'Warum dieser Plan?', wide: true,
+      body: `<p class="explain">${noPlan}</p>
+        ${items.length ? `<div class="why-list">${items.map((i) => `<div class="why-item m-${i.mode}"><span class="badge ${MODE[i.mode][2]}">${ic(MODE[i.mode][1])}${MODE[i.mode][0]}</span><p>${whyItem(i, b)}</p></div>`).join('')}</div>
+          <p class="explain">Stromkosten bis ${fmtWhen(p.horizon_end, true)}: <b>${nf(p.cost_eur, 2)} €</b> mit Plan statt ${nf(p.baseline_eur, 2)} € ohne – Ersparnis ${nf(p.savings_eur, 2)} €.</p>`
+          : `<div class="notice info" style="margin-bottom:14px">${ic('home')}<div><b>Der Plan bleibt im Eigenverbrauch.</b> ${reason}</div></div>`}
+        <details class="why-rules"><summary>${ic('chevron')}So rechnet der Planer</summary><ul>
+          <li><b>Zeitraum:</b> Stunde für Stunde bis ${fmtWhen(p.horizon_end, true)} – so weit Strompreise bekannt sind (die für morgen erscheinen gegen 13 Uhr). Neu berechnet wird alle 5 Minuten mit dem aktuellen Ladezustand.</li>
+          <li><b>Grundlage:</b> PV-Prognose ${esc(p.pv_source || 'Open-Meteo Auto')}${p.nowcast && p.nowcast.factor ? ', für die nächsten Stunden live korrigiert' : ''}, Verbrauchsprognose (Grundverbrauch ohne E-Auto und Heizstab) und die Strompreise inklusive aller Aufschläge.</li>
+          <li><b>Drei Betriebsarten:</b> <i>Eigenverbrauch</i> – der Akku lädt mit Überschuss und deckt den Verbrauch. <i>Akku halten</i> – er wird nicht entladen, Energie wird für teurere Stunden aufgehoben (Überschuss lädt weiter). <i>Aus dem Netz laden</i> – günstiger Netzstrom wird für später gespeichert.</li>
+          <li><b>Verluste:</b> Laden und Entladen zusammen ${nf(b.efficiency * 100, 0)} % Wirkungsgrad – gespeicherte Energie muss später teurer ersetzt werden, als sie gekostet hat, sonst lohnt es nicht.</li>
+          <li><b>Grenzen:</b> Reserve ${nf(b.min_soc, 0)} % wird nie unterschritten, aus dem Netz geladen wird höchstens bis ${nf(b.max_soc_grid, 0)} % und mit ${nf(b.max_charge_kw, 1)} kW${b.grid_charge ? '' : ' (Netzladen ist ausgeschaltet)'}.</li>
+          <li><b>Vorsicht bei der Sonne:</b> Sicherheitsabschlag ${caution} – bei unsicherer Prognose rechnet der Plan mit weniger PV.</li>
+          <li><b>Mindestnutzen:</b> Bringt ein Eingriff im ganzen Zeitraum weniger als ${nf(w.min_savings_ct ?? 1, 0)} ct, bleibt der Akku im Eigenverbrauch.</li>
+          <li><b>Ende des Zeitraums:</b> Energie, die dann noch im Akku ist, wird mit einem vorsichtigen Preis bewertet – so leert der Plan den Akku nicht einfach zum Schluss.</li>
+        </ul></details>`,
+    });
+  }
+
   async function renderPlan(el, token) {
     let first = true;
     const load = async () => {
@@ -642,7 +701,7 @@
           <div class="grow"><div class="faint" style="font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Empfehlung jetzt</div>
             <div style="font-size:20px;font-weight:700;margin:2px 0 4px">${esc(p.label)}</div>
             <div class="muted">${esc(p.text)}</div></div>
-          <span class="badge ${p.buy_now ? 'accent' : ''}" style="align-self:center">${p.buy_now ? 'Strom kaufen: ja' : 'Strom kaufen: nein'}</span></div></div>`
+          <div class="col" style="gap:8px;align-items:flex-end;align-self:center"><span class="badge ${p.buy_now ? 'accent' : ''}">${p.buy_now ? 'Strom kaufen: ja' : 'Strom kaufen: nein'}</span><button class="btn sm" id="whyBtn">${ic('info')}Warum dieser Plan?</button></div></div></div>`
         : `<div class="notice">${ic('alert')}<div>${esc(p.reason)}</div></div>`}
         <div class="grid kpis">
           ${kpi('battery', 'ok', 'Akku jetzt', `${cnt('psoc', nf(p.soc, 0))}<small>%</small>`, `${nf(rt.usable_kwh, 1)} kWh nutzbar bis zur Reserve von ${nf(p.battery.min_soc, 0)} %`)}
@@ -664,13 +723,15 @@
           <div class="chart" id="modeChart"></div></div></div>
         <div class="card"><div class="card-head"><h2>Stundenplan</h2></div><div class="card-body flush"><div class="table-wrap"><table class="table compact">
           <thead><tr><th>Zeit</th><th>Modus</th><th class="num">ct/kWh</th><th class="num">PV kWh</th><th class="num">Verbr. kWh</th><th class="num">Netz kWh</th><th class="num">Akku %</th></tr></thead><tbody>
-          ${p.steps.map((st) => `<tr><td class="nowrap">${fmtWhen(st.ts)}</td><td><span class="badge ${MODE[st.mode][2]}">${ic(MODE[st.mode][1])}${esc(st.label)}</span></td><td class="num">${nf(st.price, 1)}</td><td class="num">${nf(st.pv, 2)}</td><td class="num">${nf(st.load, 2)}</td><td class="num" title="↓ Bezug, ↑ Einspeisung">${st.import > 0.005 ? `↓ ${nf(st.import, 2)}` : st.export > 0.005 ? `↑ ${nf(st.export, 2)}` : '–'}</td><td class="num">${nf(st.soc_start, 0)} → ${nf(st.soc_end, 0)}</td></tr>`).join('')}
+          ${p.steps.map((st) => `<tr><td class="nowrap">${fmtWhen(st.ts)}</td><td><span class="badge ${MODE[st.mode][2]}" title="${esc(whyShort(p, st))}">${ic(MODE[st.mode][1])}${esc(st.label)}</span></td><td class="num">${nf(st.price, 1)}</td><td class="num">${nf(st.pv, 2)}</td><td class="num">${nf(st.load, 2)}</td><td class="num" title="↓ Bezug, ↑ Einspeisung">${st.import > 0.005 ? `↓ ${nf(st.import, 2)}` : st.export > 0.005 ? `↑ ${nf(st.export, 2)}` : '–'}</td><td class="num">${nf(st.soc_start, 0)} → ${nf(st.soc_end, 0)}</td></tr>`).join('')}
           </tbody></table></div>
           <div class="muted" style="padding:10px 18px 12px;font-size:12.5px;border-top:1px solid var(--border)">Der Plan ist eine <b>Empfehlung</b> – EnergyPilot steuert noch nichts. Für Automationen gibt es <code>sensor.energypilot_empfehlung</code>, <code>binary_sensor.energypilot_netzladen</code> und <code>binary_sensor.energypilot_entladesperre</code>. Neu berechnet wird alle 5 Minuten.</div></div></div>` : ''}`;
       const opts = { noAnim: !first };
       const hourHead = (ts) => `${fmtDay(ts)} ${fmtHour(ts)}–${fmtHour(ts + 3600)}`;
       const tick = (ts) => (new Date(ts * 1000).getHours() === 0 ? fmtDay(ts) : fmtHour(ts));
       const tickAt = (ts) => new Date(ts * 1000).getHours() % 6 === 0;
+      if ($('#whyBtn')) $('#whyBtn').addEventListener('click', () => planWhy(p));
+      if (p.ok && first && query().get('why') === '1') { history.replaceState(null, '', '#/plan'); planWhy(p); }
       if (p.ok) {
         chart($('#socChart'), { ...opts, xs: p.steps.map((st) => st.ts), step: 3600, height: 220, maxY: 100, lines: [{ key: 'soc', label: 'Ladezustand', color: 'var(--ok)', values: p.steps.map((st) => st.soc_end) }], fmt: (v) => `${nf(v, 0)} %`, head: hourHead, tick, tickAt });
       } else $('#socChart').innerHTML = `<div class="empty" style="padding:60px 0">${esc(p.reason)}</div>`;

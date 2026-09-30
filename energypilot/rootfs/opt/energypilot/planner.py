@@ -57,6 +57,7 @@ class Step:
     grid_import: float  # kWh
     grid_export: float
     cost: float  # ct
+    grid: float = 0.0  # kWh charged from the grid into the battery
 
 
 @dataclass
@@ -117,8 +118,8 @@ def simulate(
         target = targets[i] if targets and mode == "charge" else None
         if mode == "charge" and target is None:
             target = b.capacity_kwh * b.max_soc_grid / 100
-        soc_end, imp, exp, cost, _g = _flows(mode, soc, target, h, b, feed_in, lo, hi)
-        plan.steps.append(Step(h.start, mode, soc, soc_end, imp, exp, cost))
+        soc_end, imp, exp, cost, g = _flows(mode, soc, target, h, b, feed_in, lo, hi)
+        plan.steps.append(Step(h.start, mode, soc, soc_end, imp, exp, cost, g))
         plan.cost += cost
         soc = soc_end
     plan.cost -= max(0.0, soc - lo) * ev
@@ -175,7 +176,7 @@ def optimize(hours: list[Hour], soc_kwh: float, b: Battery, feed_in: float) -> P
             mode = "hold"
         if mode == "hold" and (h.pv_kwh >= h.load_kwh or soc <= lo + STEP_KWH):
             mode = "normal"  # nothing to hold back (surplus hour or battery already empty)
-        plan.steps.append(Step(h.start, mode, soc, soc_end, imp, exp, cost))
+        plan.steps.append(Step(h.start, mode, soc, soc_end, imp, exp, cost, grid if mode == "charge" else 0.0))
         plan.cost += cost
         soc = soc_end
     baseline = Plan(end_value=end_value)

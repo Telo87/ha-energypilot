@@ -724,3 +724,18 @@ a.notice.setup-hint:hover { filter: brightness(.97); }
 .feed-explain li + li { margin-top: 4px; }
 
 .badge.count.warn { background: var(--warn); color: #fff; }
+
+/* plan explanation */
+.col { display: flex; flex-direction: column; }
+.why-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.why-item { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.why-item p { margin: 0; font-size: 13.5px; line-height: 1.5; }
+.why-item .badge { flex: none; margin-top: 1px; }
+.why-rules { margin-top: 6px; }
+.why-rules summary { cursor: pointer; font-size: 13px; font-weight: 600; list-style: none; }
+.why-rules summary::-webkit-details-marker { display: none; }
+.why-rules summary svg { width: 15px; height: 15px; margin-right: 6px; vertical-align: -3px; transition: transform .15s; }
+.why-rules[open] summary svg { transform: rotate(90deg); }
+.why-rules ul { margin: 10px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.55; color: var(--text-2); }
+.why-rules li + li { margin-top: 5px; }
+@media (max-width: 560px) { .why-item { flex-direction: column; gap: 6px; } }
