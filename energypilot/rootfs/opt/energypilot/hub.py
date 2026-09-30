@@ -909,6 +909,17 @@ class Hub:
         price_h: dict[int, list[float]] = defaultdict(list)
         for slot in self.price_slots(start, end):
             price_h[slot["ts"] // 3600 * 3600].append(slot["price"])
+        # inverters switch off at night, their sensors then have no value -> 0 when the sun is down
+        loc = self.location
+        arrays = [arr for cfg, arr in self.arrays() if cfg["id"] in ids]
+
+        def pv_of(t: int) -> float | None:
+            if pv_n.get(t) == len(ids):
+                return pv[t]
+            if loc and arrays and all(analysis._clear(t, a, round(loc[0], 3), round(loc[1], 3)) <= 0 for a in arrays):
+                return 0.0
+            return None
+
         b = self.battery()
         feed_in = float(self.settings.data["tariff"].get("feed_in_ct", 0))
         cap = b.capacity_kwh
@@ -916,9 +927,9 @@ class Hub:
         for t in sorted(logs):
             per_day[self.day_key(t)].append(t)
         out_days = []
-        totals = {"base": 0.0, "plan": 0.0, "best": 0.0, "hours": 0}
+        totals = {"base": 0.0, "plan": 0.0, "best": 0.0, "bill": 0.0, "hours": 0}
         for day, ts_list in sorted(per_day.items(), reverse=True):
-            usable = [t for t in ts_list if pv_n.get(t) == len(ids) and t in load and t in price_h]
+            usable = [t for t in ts_list if pv_of(t) is not None and t in load and t in price_h]
             hours_detail = []
             for t in ts_list:
                 r = logs[t]
@@ -928,7 +939,7 @@ class Hub:
                     "soc_plan": r[6],  # planned at the end of the hour
                     # measured at the end of the hour = start of the next logged hour
                     "soc_actual": logs[t + 3600][7] if t + 3600 in logs else None,
-                    "pv": round(pv[t] / 1000, 3) if pv_n.get(t) == len(ids) else None,
+                    "pv": round(pv_of(t) / 1000, 3) if pv_of(t) is not None else None,
                     "load": round(load[t] / 1000, 3) if t in load else None,
                     "complete": ok,
                 })
@@ -936,14 +947,15 @@ class Hub:
                 "day": day, "hours": len(ts_list), "complete_hours": len(usable),
                 "charge_hours": sum(1 for t in ts_list if logs[t][1] == "charge"),
                 "hold_hours": sum(1 for t in ts_list if logs[t][1] == "hold"),
-                "pv_fc": round(sum(logs[t][3] or 0 for t in ts_list), 2),
-                "pv": round(sum(pv[t] for t in usable) / 1000, 2) if usable else None,
-                "load_fc": round(sum(logs[t][4] or 0 for t in ts_list), 2),
+                # forecast and measurement over the same (complete) hours
+                "pv_fc": round(sum(logs[t][3] or 0 for t in usable), 2) if usable else None,
+                "pv": round(sum(pv_of(t) for t in usable) / 1000, 2) if usable else None,
+                "load_fc": round(sum(logs[t][4] or 0 for t in usable), 2) if usable else None,
                 "load": round(sum(load[t] for t in usable) / 1000, 2) if usable else None,
                 "detail": hours_detail,
             }
             if usable:
-                hrs = [planner.Hour(t, pv[t] / 1000, max(0.0, load[t]) / 1000, sum(price_h[t]) / len(price_h[t])) for t in usable]
+                hrs = [planner.Hour(t, pv_of(t) / 1000, max(0.0, load[t]) / 1000, sum(price_h[t]) / len(price_h[t])) for t in usable]
                 soc0 = cap * float(logs[usable[0]][7] or 0) / 100
                 ev = planner.end_price(hrs, b)
                 base = planner.simulate(hrs, soc0, b, feed_in, end_value=ev)
@@ -951,14 +963,18 @@ class Hub:
                 targets = [cap * float(logs[t][6] or 0) / 100 for t in usable]
                 followed = planner.simulate(hrs, soc0, b, feed_in, modes, targets, end_value=ev)
                 best = planner.optimize(hrs, soc0, b, feed_in)
+                # shown bills: only what was bought and fed in. The savings also count
+                # the energy left in the battery at the end (all three at the same price)
+                bill = lambda plan: sum(st.cost for st in plan.steps)
                 entry.update(
-                    cost_base=round(base.cost / 100, 2), cost_plan=round(followed.cost / 100, 2),
-                    cost_best=round(best.cost / 100, 2),
+                    cost_base=round(bill(base) / 100, 2), cost_plan=round(bill(followed) / 100, 2),
+                    cost_best=round(bill(best) / 100, 2),
                     saved=round((base.cost - followed.cost) / 100, 2), possible=round((base.cost - best.cost) / 100, 2),
                 )
                 totals["base"] += base.cost
                 totals["plan"] += followed.cost
                 totals["best"] += best.cost
+                totals["bill"] += bill(base)
                 totals["hours"] += len(usable)
             out_days.append(entry)
         return {
@@ -968,7 +984,7 @@ class Hub:
                 "hours": totals["hours"],
                 "saved": round((totals["base"] - totals["plan"]) / 100, 2),
                 "possible": round((totals["base"] - totals["best"]) / 100, 2),
-                "cost_base": round(totals["base"] / 100, 2),
+                "cost_base": round(totals["bill"] / 100, 2),
             },
             "battery": self.settings.data["battery"],
         }

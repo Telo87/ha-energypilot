@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2
+
+- Behoben (Protokoll): Nachtstunden wurden nicht ausgewertet, weil Wechselrichter nachts abschalten und ihr Sensor dann keinen Wert liefert – bei Sonne unter dem Horizont zählt die Erzeugung jetzt als 0
+- Behoben (Protokoll): Die angezeigten Stromkosten enthielten eine Gutschrift für die Energie, die am Ende noch im Akku steckt – dadurch z. B. −0,74 € für eine einzige Stunde. Angezeigt wird jetzt die reine Stromrechnung; die Gutschrift wirkt nur noch beim Vergleich (gespart / möglich)
+- Protokoll: Prognose und Messung von PV und Verbrauch werden über dieselben Stunden verglichen
+
 ## 0.5.1
 
 - Neu: **Einrichtung** (unter Verwaltung) – prüft, ob alle Einstellungen vorhanden, erreichbar und plausibel sind: Verbindung und Standort; PV-Anlagen (Sensor vorhanden, Einheit, Langzeitstatistik, aktuelle Werte, gemessene Höchstleistung passend zur kWp-Angabe); Sensoren inklusive **Vorzeichen-Prüfung** (bei großem PV-Überschuss muss eingespeist bzw. der Akku geladen werden) und Lücken bei E-Auto/Heizstab; Strompreis (Preise vorhanden, Aufschlag, MwSt, Einspeisevergütung plausibel); Batterie (Kapazität, Leistungen, Reserve, Wirkungsgrad); Prognosequellen, eigene Prognose, Verbrauchsprognose und Plan

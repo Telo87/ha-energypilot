@@ -670,7 +670,7 @@
     const d = await api(`journal?days=${days}`);
     if (stale(token)) return;
     const t = d.totals;
-    setHeader('Protokoll', d.since ? `Empfehlungen seit ${new Date(d.since * 1000).toLocaleDateString('de-DE')} · ${t.hours} Stunden mit vollständigen Messwerten ausgewertet` : '');
+    setHeader('Protokoll', d.since ? `Empfehlungen seit ${new Date(d.since * 1000).toLocaleDateString('de-DE')} · ${t.hours} ${t.hours === 1 ? 'Stunde' : 'Stunden'} mit vollständigen Messwerten ausgewertet` : '');
     if (!d.days.length) {
       el.innerHTML = `<div class="card"><div class="card-body">${empty('journal', 'Das Protokoll füllt sich ab jetzt', 'Jede Stunde wird festgehalten, was EnergyPilot empfohlen hat – mit Preis, Prognosen und geplantem Ladezustand. Sobald die Messwerte der Stunde da sind, rechnet EnergyPilot nach, was das Befolgen der Empfehlungen wirklich gebracht hätte. Voraussetzung ist ein Plan (Sensor für den Batterie-Ladezustand).')}</div></div>`;
       return;
@@ -685,7 +685,7 @@
         ${kpi('target', share != null && share >= 60 ? 'ok' : 'warn', 'Davon erreicht', share == null ? '–' : `${cnt('jq', nf(share, 0))}<small>%</small>`, share == null ? 'bisher keine Ersparnis möglich' : 'Anteil der möglichen Ersparnis')}
         ${kpi('home', '', 'Stromkosten ohne EnergyPilot', `${cnt('jc', nf(t.cost_base, 2))}<small>€</small>`, 'so wie der Akku tatsächlich lief; negativ = Einnahmen überwiegen')}
       </div>
-      <div class="notice info" style="margin-top:16px">${ic('info')}<div>Für jeden Tag rechnet EnergyPilot drei Stromrechnungen aus den <b>echten</b> Messwerten und Preisen: <b>ohne EnergyPilot</b> (Akku im Eigenverbrauch, wie er tatsächlich lief), <b>mit EnergyPilot</b> (die Empfehlungen, die zur jeweiligen Stunde aus den Prognosen entstanden, wären befolgt worden) und <b>optimal</b> (im Nachhinein bestmöglich). Liegt „mit EnergyPilot“ dauerhaft nahe an „optimal“, sind Prognosen und Planung verlässlich genug für die Steuerung. Grundlage ist der Grundverbrauch – E-Auto und Heizstab sind nicht enthalten.</div></div>
+      <div class="notice info" style="margin-top:16px">${ic('info')}<div>Für jeden Tag rechnet EnergyPilot drei Stromrechnungen aus den <b>echten</b> Messwerten und Preisen: <b>ohne EnergyPilot</b> (Akku im Eigenverbrauch, wie er tatsächlich lief), <b>mit EnergyPilot</b> (die Empfehlungen, die zur jeweiligen Stunde aus den Prognosen entstanden, wären befolgt worden) und <b>optimal</b> (im Nachhinein bestmöglich). Liegt „mit EnergyPilot“ dauerhaft nahe an „optimal“, sind Prognosen und Planung verlässlich genug für die Steuerung. Die Ersparnis berücksichtigt auch, wie viel Energie am Ende noch im Akku steckt. Grundlage ist der Grundverbrauch – E-Auto und Heizstab sind nicht enthalten.</div></div>
       <div class="card" style="margin-top:16px"><div class="card-head"><h2>Ersparnis pro Tag</h2></div><div class="card-body">
         <div class="legend"><span class="static"><i class="box" style="background:var(--ok)"></i>Mit EnergyPilot gespart</span><span class="static"><i style="background:var(--text-2)"></i>Im Nachhinein möglich</span></div>
         <div class="chart" id="jChart"></div></div></div>

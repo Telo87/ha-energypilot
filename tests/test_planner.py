@@ -195,3 +195,20 @@ def test_setup_check_finds_wrong_settings(tmp_path):
     assert titles["Kein Aufschlag eingetragen"] == "warn"
     assert titles["E-Auto / Wallbox: Entität nicht gefunden"] == "err"
     assert res["summary"]["err"] >= 3
+
+
+def test_journal_counts_night_hours_without_pv_values(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"location": {"latitude": 52, "longitude": 9}})
+    settings.upsert_array({"name": "Dach", "planes": [{"kwp": 5}], "sensor": "sensor.pv"})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    start = hub.midnight(int(time.time())) - 86400  # yesterday 0-4 o'clock: dark, inverter asleep
+    for i in range(4):
+        t = start + i * 3600
+        hub.db.log_plan((t, "normal", 30.0, 0.0, 0.5, 50.0, 45.0, 50.0, t))
+        hub.db.put_actual([("base", t, 500.0)])  # no PV value at all
+        hub.db.put_prices([(t + q * 900, 900, 250.0) for q in range(4)])
+    day = next(d for d in hub.journal(days=3)["days"] if d["hours"])
+    assert day["complete_hours"] == 4
+    assert day["pv"] == 0 and day["load"] == 2.0 and day["load_fc"] == 2.0
+    assert day["cost_base"] == 0  # battery covers the night: nothing bought, no credit for the energy left
