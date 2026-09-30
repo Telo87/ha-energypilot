@@ -122,3 +122,36 @@ def test_journal_scores_recommendations(tmp_path):
     assert yesterday["charge_hours"] == 1
     assert yesterday["saved"] > 0  # charging at 15 ct for the 50 ct hours pays off
     assert yesterday["possible"] >= yesterday["saved"] - 0.01
+
+
+def test_costs_from_grid_energy_and_prices(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({
+        "sensors": {"grid": "sensor.netz", "grid_import": "sensor.bezug", "grid_export": "sensor.einspeisung"},
+        "tariff": {"markup_ct": 0, "vat": 0, "feed_in_ct": 8, "base_fee_eur": 3.0,
+                   "compare_price_ct": 30, "compare_base_fee_eur": 0},
+    })
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    start = hub.midnight(1790000000)
+    # hour 0: 2 kWh import at 20 ct; hour 1: 1 kWh import at 40 ct and 3 kWh export
+    hub.db.put_actual([("grid_in", start, 2000.0), ("grid_out", start, 0.0),
+                       ("grid_in", start + 3600, 1000.0), ("grid_out", start + 3600, 3000.0)])
+    hub.db.put_prices([(start + q * 900, 900, 200.0) for q in range(4)] + [(start + 3600 + q * 900, 900, 400.0) for q in range(4)])
+    res = hub.costs(start, start + 86400)
+    day = res["days"][0]
+    assert day["import_kwh"] == 3 and day["export_kwh"] == 3
+    assert day["energy_eur"] == 0.8  # 2 x 20 ct + 1 x 40 ct
+    assert day["feed_in_eur"] == 0.24
+    assert day["avg_paid_ct"] == pytest.approx(26.67, abs=0.01)
+    assert day["compare_eur"] == 0.9  # 3 kWh at 30 ct, no base fee
+    assert res["split"] is True
+
+
+def test_costs_fall_back_to_signed_grid_value(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"sensors": {"grid": "sensor.netz"}, "invert": {"grid": True}})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    start = hub.midnight(1790000000)
+    hub.db.put_actual([("grid", start, -1500.0), ("grid", start + 3600, 500.0)])  # inverted: import, then export
+    day = hub.costs(start, start + 86400)["days"][0]
+    assert day["import_kwh"] == 1.5 and day["export_kwh"] == 0.5

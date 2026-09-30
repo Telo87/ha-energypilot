@@ -9,7 +9,7 @@ Heizstab bauen darauf auf.
 
 1. Add-on starten und **Web-UI öffnen**.
 2. Unter **Einstellungen › PV-Anlagen** für jeden Messsensor, meist einen Wechselrichter, eine Anlage anlegen:
-   - **Messsensor:** Sensor des Wechselrichters, z. B. die AC-Leistung (W) oder der Energiezähler (kWh) des Fronius.
+   - **Messsensor:** Sensor des Wechselrichters, z. B. die AC-Leistung (W) oder der Energiezähler (kWh).
    - **Teilflächen:** eine Zeile pro Ausrichtung mit Leistung (kWp), Neigung (0° = flach, 90° = senkrecht) und Ausrichtung (Ost, Süd, West … oder genau in Grad, 90° = Ost, 180° = Süd, 270° = West).
 3. Unter **Strompreis** die festen Preisbestandteile deines Tarifs eintragen (siehe unten).
 4. Optional unter **Sensoren & Standort** Hausverbrauch, Netzleistung und Batterie auswählen.
@@ -25,7 +25,7 @@ genauesten ist. Er muss nicht erst wochenlang Daten sammeln.
 ## Messsensor
 
 Der Sensor braucht eine **Langzeitstatistik**, also ein Attribut `state_class`. Die
-Wechselrichter-Integrationen (Fronius, SMA, …) setzen das automatisch. Im Auswahlfeld sind Sensoren
+Die meisten Wechselrichter-Integrationen setzen das automatisch. Im Auswahlfeld sind Sensoren
 ohne Statistik markiert. Unterstützt werden:
 
 - Leistung in W oder kW (EnergyPilot nutzt den Stundenmittelwert),
@@ -132,6 +132,22 @@ EnergyPilot **steuert noch nichts**. Die Empfehlung steht als Sensoren für eige
 | `binary_sensor.energypilot_entladesperre` | an, wenn der Akku jetzt nicht entladen werden soll |
 | `sensor.energypilot_akku_reichweite` | Stunden beim aktuellen Verbrauch; Attribute `empty_at`, `full_at` |
 
+## Kosten
+
+Die Seite **Kosten** rechnet aus dem gemessenen Netzbezug jeder Stunde und dem Preis dieser Stunde (Mittel
+der Viertelstundenpreise) die tatsächlichen Stromkosten – pro Tag und Monat, plus anteilige Grundgebühr,
+abzüglich Einspeisevergütung (Einstellungen › Strompreis). Dazu:
+
+- **Ø bezahlter Preis** gegenüber dem Durchschnitt aller Viertelstunden: liegt er darunter, wird eher in
+  günstigen Stunden gekauft – genau das sollen Akku und Planung bewirken.
+- **Vergleich mit einem Festpreistarif** mit einstellbarem Arbeits- und Grundpreis.
+- **Autarkie** (Anteil des Hausverbrauchs aus eigener Erzeugung) und **Eigenverbrauch** (Anteil der
+  PV-Erzeugung, der nicht eingespeist wird).
+
+Am genauesten wird es mit eigenen Sensoren für **Netzbezug** und **Einspeisung** (Einstellungen ›
+Sensoren – viele Speicher und Smartmeter liefern beide Werte getrennt). Mit nur einer Netzleistung mit
+Vorzeichen heben sich Bezug und Einspeisung innerhalb einer Stunde gegenseitig auf.
+
 ## Protokoll
 
 Jede Stunde hält EnergyPilot fest, was es zu Beginn der Stunde empfohlen hat – mit Preis, PV- und
@@ -167,7 +183,7 @@ wenn Quellen unterschiedlich lange Daten haben, z. B. Forecast.Solar ohne Archiv
 
 ## Strompreis
 
-Dynamische Tarife wie **sonnen EnergyDynamic** geben den Börsenpreis (EPEX Day-Ahead, seit Oktober
+Dynamische Stromtarife geben den Börsenpreis (EPEX Day-Ahead, seit Oktober
 2025 in Viertelstunden) weiter. EnergyPilot lädt ihn von Energy-Charts (Fraunhofer ISE) mit
 aWATTar als Ersatzquelle und rechnet den Endpreis so:
 
@@ -179,7 +195,7 @@ Der Aufschlag netto ist die Summe aus Netzentgelt, Umlagen, Stromsteuer und dem 
 Anbieters, jeweils in ct/kWh ohne Mehrwertsteuer. Die Werte stehen im Vertrag bzw. auf der Rechnung.
 
 Einfacher geht es mit **„Aufschlag aus einem Preis berechnen“**: einen oder mehrere Gesamtpreise aus der
-App des Anbieters (z. B. sonnen-App, viertelstündlicher Preis) mit Tag und Uhrzeit eintragen. EnergyPilot
+App des Stromanbieters (viertelstündlicher Preis) mit Tag und Uhrzeit eintragen. EnergyPilot
 rechnet `Preis ÷ (1 + MwSt) − Börsenpreis` für jede Viertelstunde aus und übernimmt den Mittelwert.
 
 ## Sensoren in Home Assistant

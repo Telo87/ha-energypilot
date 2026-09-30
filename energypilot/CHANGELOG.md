@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0
+
+- Neu: **Kosten** – Stromkosten pro Tag und Monat aus dem gemessenen Netzbezug und dem Preis der jeweiligen Stunde, plus anteilige Grundgebühr, abzüglich Einspeisevergütung; rückwirkend für den ganzen Rückblick-Zeitraum
+- **Ø bezahlter Preis** gegenüber dem Durchschnitt aller Viertelstunden – zeigt, ob Strom eher in günstigen oder teuren Stunden gekauft wird
+- **Vergleich mit einem Festpreistarif** (Arbeitspreis und Grundpreis einstellbar) und Monatsübersicht der letzten 12 Monate
+- **Autarkie** und **Eigenverbrauchsquote**
+- Neu in den Einstellungen: Grundgebühr, Vergleichstarif; optionale Sensoren **Netzbezug** und **Einspeisung** (genauer als die Netzleistung mit Vorzeichen)
+- Börsenpreise werden für den Rückblick-Zeitraum rückwirkend geladen
+- Texte in Oberfläche und Dokumentation neutral formuliert (keine Anbieter- oder Produktnamen als Beispiele)
+
 ## 0.4.1
 
 - Neu: **Aufschlag aus einem Preis berechnen** (Einstellungen › Strompreis) – Gesamtpreise aus der App des Anbieters mit Tag und Uhrzeit eintragen, EnergyPilot rechnet den Aufschlag netto aus dem Börsenpreis der jeweiligen Viertelstunde zurück, bildet bei mehreren Preisen den Mittelwert und zeigt, ob sie zusammenpassen; mit einem Klick übernehmen
@@ -34,7 +44,7 @@
 
 ## 0.3.2
 
-- Neu: **Richtung umkehren** für Hausverbrauch, Netzleistung und Batterie-Leistung (Einstellungen › Sensoren) – z. B. für die sonnenBatterie, die Entladen positiv meldet. Darunter steht sofort, wie EnergyPilot den aktuellen Wert versteht („Batterie entlädt mit 737 W“)
+- Neu: **Richtung umkehren** für Hausverbrauch, Netzleistung und Batterie-Leistung (Einstellungen › Sensoren) – z. B. für Speicher, die Entladen positiv melden. Darunter steht sofort, wie EnergyPilot den aktuellen Wert versteht („Batterie entlädt mit 737 W“)
 - Unter jedem gewählten Sensor wird der **aktuelle Zustand** angezeigt
 - Behoben: Batterie wurde als „lädt“ angezeigt, obwohl sie entlädt (fehlende Vorzeichen-Einstellung)
 

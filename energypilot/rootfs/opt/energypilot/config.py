@@ -78,14 +78,20 @@ DEFAULT_SETTINGS: dict = {
         "markup_ct": 0.0,  # net surcharge on top of the spot price (grid fees, levies, provider)
         "vat": 19.0,
         "feed_in_ct": 0.0,
+        "base_fee_eur": 0.0,  # monthly base fee - only for the cost overview
+        # fixed-price tariff to compare with (gross)
+        "compare_price_ct": 32.0,
+        "compare_base_fee_eur": 12.0,
     },
     # ev / heater: measured separately and subtracted from the house consumption
-    "sensors": {"house": "", "grid": "", "battery_soc": "", "battery_power": "", "ev": "", "heater": ""},
+    "sensors": {"house": "", "grid": "", "battery_soc": "", "battery_power": "", "ev": "", "heater": "",
+                # optional: import and export separately (more exact than one signed grid value)
+                "grid_import": "", "grid_export": ""},
     # flip the sign of a sensor – EnergyPilot expects: house consumption positive,
     # grid positive = import, battery positive = charging
     "invert": {"house": False, "grid": False, "battery_power": False},
     "backfill_days": 90,
-    # home battery for the planner (sonnenBatterie etc.)
+    # home battery for the planner
     "battery": {
         "capacity_kwh": 11.0,
         "min_soc": 10.0,  # % reserve the battery does not go below
@@ -279,7 +285,8 @@ class Settings:
                 if "bidding_zone" in tariff:
                     zone = str(tariff["bidding_zone"] or "").strip().upper()
                     t["bidding_zone"] = zone if re.fullmatch(r"[A-Z0-9-]{2,10}", zone) else "DE-LU"
-                for key, hi in (("markup_ct", 200), ("vat", 50), ("feed_in_ct", 100)):
+                for key, hi in (("markup_ct", 200), ("vat", 50), ("feed_in_ct", 100), ("base_fee_eur", 200),
+                                ("compare_price_ct", 200), ("compare_base_fee_eur", 200)):
                     if key in tariff:
                         t[key] = _num(tariff[key], t[key], 0, hi)
             inv = values.get("invert")

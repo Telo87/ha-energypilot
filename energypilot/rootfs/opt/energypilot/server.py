@@ -138,6 +138,24 @@ async def journal(request: web.Request) -> web.Response:
     return _ok(await asyncio.to_thread(_hub(request).journal, days))
 
 
+@routes.get("/api/costs")
+async def costs(request: web.Request) -> web.Response:
+    hub = _hub(request)
+    month = request.query.get("month") or hub.day_key(time.time())[:7]
+    if not re.fullmatch(r"\d{4}-\d{2}", month):
+        raise web.HTTPBadRequest(text="Monat als JJJJ-MM angeben")
+    y, m = int(month[:4]), int(month[5:])
+    start = analysis.day_start(f"{y:04d}-{m:02d}-01", hub.tz)
+    end = analysis.day_start(f"{y + (m == 12):04d}-{m % 12 + 1:02d}-01", hub.tz)
+    res = await asyncio.to_thread(hub.costs, start, end)
+    return _ok({"month": month, **res})
+
+
+@routes.get("/api/costs/months")
+async def cost_months(request: web.Request) -> web.Response:
+    return _ok(await asyncio.to_thread(_hub(request).cost_months, 12))
+
+
 @routes.get("/api/plan")
 async def plan(request: web.Request) -> web.Response:
     hub = _hub(request)

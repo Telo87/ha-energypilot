@@ -152,6 +152,7 @@
     palette: '<path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11.5" r="1"/><circle cx="10.5" cy="7.5" r="1"/><circle cx="15" cy="7.5" r="1"/>',
     compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
     journal: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/>',
+    wallet: '<path d="M20 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5"/><path d="M16 13h.01"/>',
   };
   const ic = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[name] || ''}</svg>`;
 
@@ -383,6 +384,7 @@
     { id: 'accuracy', title: 'Prognose-Check', icon: 'target' },
     { id: 'day', title: 'Tagesverlauf', icon: 'chart' },
     { id: 'prices', title: 'Strompreise', icon: 'euro' },
+    { id: 'costs', title: 'Kosten', icon: 'wallet' },
     { id: 'settings', title: 'Einstellungen', icon: 'gear', section: 'Verwaltung' },
   ];
   function renderNav() {
@@ -921,6 +923,64 @@
     priceChart($('#prChart'), slots, now, 300);
   }
 
+  // ------------------------------------------------------------------ costs
+  const monthName = (ym) => new Date(`${ym}-15T12:00:00`).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+  const shiftMonth = (ym, n) => { const d = new Date(`${ym}-15T12:00:00`); d.setMonth(d.getMonth() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+  async function renderCosts(el, token) {
+    const cur = localDay().slice(0, 7);
+    const month = query().get('m') || cur;
+    const [d, months] = await Promise.all([api(`costs?month=${month}`), api('costs/months')]);
+    if (stale(token)) return;
+    const t = d.totals; const tf = d.tariff;
+    setHeader('Kosten', `${monthName(month)} · Netzbezug zum Preis der jeweiligen Stunde${d.split ? '' : ' (aus der Netzleistung mit Vorzeichen)'}`);
+    const nav = `<div class="toolbar"><div class="day-nav"><button class="icon-btn" id="mPrev" title="Vormonat">${ic('chevronL')}</button><b style="min-width:150px;text-align:center">${esc(monthName(month))}</b><button class="icon-btn" id="mNext" title="Nächster Monat" ${month >= cur ? 'disabled' : ''}>${ic('chevron')}</button></div></div>`;
+    const bindNav = () => {
+      $('#mPrev').addEventListener('click', () => { location.hash = `#/costs?m=${shiftMonth(month, -1)}`; });
+      if (month < cur) $('#mNext').addEventListener('click', () => { location.hash = `#/costs?m=${shiftMonth(month, 1)}`; });
+    };
+    if (!d.has_grid) {
+      el.innerHTML = `${nav}<div class="card"><div class="card-body">${empty('wallet', 'Netzleistung fehlt', 'Für die Kostenübersicht braucht EnergyPilot den Netzbezug – entweder die Netzleistung mit Vorzeichen oder (genauer) Netzbezug und Einspeisung als eigene Sensoren.', `<a class="btn primary" href="#/settings?tab=sensors">${ic('gear')}Sensoren einstellen</a>`)}</div></div>`;
+      bindNav(); return;
+    }
+    if (!d.days.length) {
+      el.innerHTML = `${nav}<div class="card"><div class="card-body">${empty('wallet', 'Keine Daten für diesen Monat', 'Für diesen Monat liegen keine Messwerte des Netzbezugs vor.')}</div></div>`;
+      bindNav(); return;
+    }
+    const kpi = (icon, cls, label, value, foot) => `<div class="card kpi"><div class="kpi-label"><span class="kpi-icon ${cls}">${ic(icon)}</span>${label}</div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`;
+    const better = t.avg_paid_ct != null && t.avg_market_ct != null ? t.avg_market_ct - t.avg_paid_ct : null;
+    el.innerHTML = `${nav}
+      <div class="grid kpis">
+        ${kpi('wallet', '', 'Stromkosten', `${cnt('ct', nf(t.total_eur, 2))}<small>€</small>`, `Netzbezug ${eur(t.energy_eur)} + Grundgebühr ${eur(t.fee_eur)} − Einspeisung ${eur(t.feed_in_eur)}${t.days < 28 ? ` · ${t.days} Tage` : ''}`)}
+        ${kpi('euro', better != null && better > 0 ? 'ok' : 'warn', 'Ø bezahlter Preis', t.avg_paid_ct == null ? '–' : `${cnt('cp', nf(t.avg_paid_ct, 1))}<small>ct/kWh</small>`, t.avg_market_ct == null ? '' : `Ø aller Viertelstunden ${nf(t.avg_market_ct, 1)} ct${better != null ? ` · ${better >= 0 ? `${nf(better, 1)} ct günstiger gekauft` : `${nf(-better, 1)} ct teurer gekauft`}` : ''}`)}
+        ${kpi('plug', '', 'Netzbezug', `${cnt('ci', nf(t.import_kwh, 0))}<small>kWh</small>`, `Einspeisung ${nf(t.export_kwh, 0)} kWh${tf.feed_in_ct ? ` à ${nf(tf.feed_in_ct, 2)} ct` : ' – Vergütung in den Einstellungen eintragen'}`)}
+        ${kpi('trophy', t.savings_eur >= 0 ? 'ok' : 'err', t.savings_eur >= 0 ? 'Gespart ggü. Festpreis' : 'Mehrkosten ggü. Festpreis', `${cnt('cs', nf(Math.abs(t.savings_eur), 2))}<small>€</small>`, `Festpreis ${nf(tf.compare_price_ct, 1)} ct/kWh + ${nf(tf.compare_base_fee_eur, 2)} €/Monat wären ${eur(t.compare_total_eur)} gewesen`)}
+        ${t.autarky_pct != null ? kpi('home', 'up', 'Autarkie', `${cnt('ca', nf(t.autarky_pct, 0))}<small>%</small>`, `des Hausverbrauchs aus eigener Erzeugung${t.self_use_pct != null ? ` · Eigenverbrauch ${nf(t.self_use_pct, 0)} % der PV` : ''}`) : ''}
+      </div>
+      ${t.unpriced_kwh > 0.5 ? `<div class="notice" style="margin-top:16px">${ic('info')}<div>Für ${nf(t.unpriced_kwh, 1)} kWh Netzbezug liegt kein Börsenpreis vor – sie fehlen in den Kosten.</div></div>` : ''}
+      ${!tf.base_fee_eur ? `<div class="notice info" style="margin-top:16px">${ic('info')}<div>Grundgebühr, Einspeisevergütung und den Vergleichstarif trägst du unter <a href="#/settings?tab=tariff">Einstellungen › Strompreis</a> ein.</div></div>` : ''}
+      <div class="card" style="margin-top:16px"><div class="card-head"><h2>Stromkosten pro Tag <span class="sub">inkl. anteiliger Grundgebühr, abzüglich Einspeisung</span></h2></div><div class="card-body">
+        <div class="legend"><span class="static"><i class="box" style="background:var(--price)"></i>Dynamischer Tarif</span><span class="static"><i style="background:var(--text-2)"></i>Festpreis</span></div>
+        <div class="chart" id="costChart"></div></div></div>
+      <div class="grid cols-2">
+        <div class="card"><div class="card-head"><h2>Tage</h2></div><div class="card-body flush"><div class="table-wrap"><table class="table compact">
+          <thead><tr><th>Tag</th><th class="num">Bezug kWh</th><th class="num">Ø ct</th><th class="num">Einsp. kWh</th><th class="num">Kosten</th><th class="num">Festpreis</th></tr></thead><tbody>
+          ${d.days.slice().reverse().map((x) => `<tr><td class="nowrap">${fmtDay(dayTs(x.day))}${x.hours < 23 ? ` <span class="faint">(${x.hours} h)</span>` : ''}</td><td class="num">${nf(x.import_kwh, 1)}</td><td class="num">${x.avg_paid_ct == null ? '–' : nf(x.avg_paid_ct, 1)}</td><td class="num">${nf(x.export_kwh, 1)}</td><td class="num">${eur(x.total_eur)}</td><td class="num faint">${eur(x.compare_total_eur)}</td></tr>`).join('')}
+          </tbody></table></div></div></div>
+        <div class="card"><div class="card-head"><h2>Monate</h2></div><div class="card-body flush"><div class="table-wrap"><table class="table compact">
+          <thead><tr><th>Monat</th><th class="num">Bezug kWh</th><th class="num">Ø ct</th><th class="num">Kosten</th><th class="num">ggü. Festpreis</th></tr></thead><tbody>
+          ${months.map((x) => `<tr class="click" data-m="${x.month}"><td class="nowrap">${esc(monthName(x.month))}${x.days < 28 ? ` <span class="faint">(${x.days} T.)</span>` : ''}</td><td class="num">${nf(x.import_kwh, 0)}</td><td class="num">${x.avg_paid_ct == null ? '–' : nf(x.avg_paid_ct, 1)}</td><td class="num">${eur(x.total_eur)}</td><td class="num ${x.savings_eur >= 0 ? 'best' : 'pos'}">${x.savings_eur >= 0 ? '−' : '+'}${nf(Math.abs(x.savings_eur), 2)} €</td></tr>`).join('')}
+          </tbody></table></div></div></div>
+      </div>`;
+    chart($('#costChart'), {
+      xs: d.days.map((x) => dayTs(x.day)), step: 86400, height: 220, tickCenter: true,
+      bar: { label: 'Stromkosten', color: 'var(--price)', cls: 'bar-p', values: d.days.map((x) => x.total_eur), clsFor: (i, v) => (v < 0 ? 'neg' : '') },
+      lines: [{ key: 'fix', label: 'Festpreis', color: 'var(--text-2)', dash: true, values: d.days.map((x) => x.compare_total_eur) }],
+      fmt: (v) => eur(v), axisFmt: (v) => `${nf(v, 2)} €`, head: (ts) => fmtDay(ts), tick: (ts) => new Date(ts * 1000).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }),
+    });
+    bindNav();
+    $$('tr[data-m]').forEach((tr) => tr.addEventListener('click', () => { location.hash = `#/costs?m=${tr.dataset.m}`; }));
+  }
+
   // --------------------------------------------------------------- settings
   const SET_TABS = [['arrays', 'solar', 'PV-Anlagen'], ['sources', 'cloudSun', 'Prognosequellen'], ['tariff', 'euro', 'Strompreis'], ['battery', 'battery', 'Batterie'], ['sensors', 'sliders', 'Sensoren & Standort'], ['look', 'palette', 'Darstellung']];
   async function renderSettings(el, token) {
@@ -1033,7 +1093,7 @@
             ${a.sensor ? `<button class="btn sm" data-geo="${a.id}" title="Aus den Messwerten prüfen, ob Ausrichtung und Neigung stimmen">${ic('compass')}<span class="hide-sm">Ausrichtung prüfen</span></button>` : ''}
             <button class="icon-btn" title="Bearbeiten">${ic('edit')}</button></div>`).join('')
           || '<div class="muted" style="padding:6px 18px 14px;font-size:13px">Noch keine Anlage. Lege für jeden Messsensor (meist ein Wechselrichter) eine Anlage an. Zeigen Module an einem Wechselrichter in verschiedene Richtungen – z. B. ein String nach Osten, einer nach Westen –, trägst du sie als Teilflächen derselben Anlage ein.</div>'}</div></div></div>
-        <div class="notice info" style="margin-top:16px">${ic('info')}<div><b>Messsensor:</b> Ein Leistungssensor (W/kW, z. B. „AC-Leistung“ des Fronius-Wechselrichters) oder ein Energiezähler (Wh/kWh). Er braucht eine Langzeitstatistik (state_class) – dann liest EnergyPilot die Erzeugung der letzten ${S.settings.backfill_days} Tage rückwirkend aus Home Assistant und kann die Prognosen sofort vergleichen.</div></div>`;
+        <div class="notice info" style="margin-top:16px">${ic('info')}<div><b>Messsensor:</b> Ein Leistungssensor (W/kW, z. B. die AC-Leistung des Wechselrichters) oder ein Energiezähler (Wh/kWh). Er braucht eine Langzeitstatistik (state_class) – dann liest EnergyPilot die Erzeugung der letzten ${S.settings.backfill_days} Tage rückwirkend aus Home Assistant und kann die Prognosen sofort vergleichen.</div></div>`;
       $('#addArr').addEventListener('click', () => arrayForm());
       $$('[data-edit]').forEach((r) => r.addEventListener('click', (e) => { if (!e.target.closest('[data-geo]')) arrayForm(S.settings.arrays.find((a) => a.id === r.dataset.edit)); }));
       $$('[data-geo]').forEach((b) => b.addEventListener('click', () => geometryCheck(S.settings.arrays.find((a) => a.id === b.dataset.geo))));
@@ -1076,7 +1136,7 @@
       modal({
         title: isNew ? 'PV-Anlage hinzufügen' : 'PV-Anlage bearbeiten',
         body: `<div class="form-grid">
-          <div class="field span-2"><label>Name</label><input class="input" id="a_name" value="${esc(cfg.name || '')}" placeholder="z. B. Hausdach oder Garage Ost-West"></div>
+          <div class="field span-2"><label>Name</label><input class="input" id="a_name" value="${esc(cfg.name || '')}" placeholder="z. B. Hausdach Süd oder Carport"></div>
           <div class="field span-2"><label>Messsensor (Wechselrichter)</label>${entityPicker('a_sensor', ents, cfg.sensor || '', ['power', 'energy'])}<span class="hint">Leistung (W/kW) oder Energiezähler (Wh/kWh) – er misst alle Teilflächen unten zusammen</span></div>
         </div>
         <div class="field"><label>Teilflächen</label>
@@ -1197,25 +1257,29 @@
     const draw = () => {
       el.innerHTML = `<div class="grid cols-2">
         <div class="card"><div class="card-head"><div class="avatar accent">${ic('euro')}</div><h2>Arbeitspreis</h2></div><div class="card-body">
-          <p class="explain">Dynamische Tarife wie <b>sonnen EnergyDynamic</b>, Tibber oder Rabot geben den Börsenpreis (EPEX Day-Ahead) stündlich bzw. viertelstündlich weiter. Auf den Börsenpreis kommen feste Bestandteile: Netzentgelt, Umlagen, Stromsteuer und der Aufschlag des Anbieters. Die Werte stehen im Vertrag oder auf der Rechnung.</p>
+          <p class="explain">Dynamische Stromtarife geben den Börsenpreis (EPEX Day-Ahead) stündlich bzw. viertelstündlich weiter. Auf den Börsenpreis kommen feste Bestandteile: Netzentgelt, Umlagen, Stromsteuer und der Aufschlag des Anbieters. Die Werte stehen im Vertrag oder auf der Rechnung.</p>
           <div class="form-grid">
             <div class="field"><label>Gebotszone</label><input class="input" id="t_zone" list="t_zones" value="${esc(t.bidding_zone)}"><datalist id="t_zones"><option value="DE-LU"><option value="AT"><option value="CH"><option value="NL"><option value="BE"><option value="FR"></datalist><span class="hint">Deutschland: DE-LU</span></div>
             <div class="field"><label>Aufschlag netto (ct/kWh)</label><input class="input" id="t_markup" type="number" step="0.01" min="0" value="${t.markup_ct}"><span class="hint">Summe aller festen Preisbestandteile ohne MwSt</span></div>
             <div class="field"><label>Mehrwertsteuer (%)</label><input class="input" id="t_vat" type="number" step="0.1" min="0" value="${t.vat}"></div>
-            <div class="field"><label>Einspeisevergütung (ct/kWh)</label><input class="input" id="t_feed" type="number" step="0.01" min="0" value="${t.feed_in_ct}"><span class="hint">Für die spätere Optimierung</span></div>
+            <div class="field"><label>Einspeisevergütung (ct/kWh)</label><input class="input" id="t_feed" type="number" step="0.01" min="0" value="${t.feed_in_ct}"><span class="hint">Für Planung und Kostenübersicht</span></div>
+            <div class="field"><label>Grundgebühr (€/Monat)</label><input class="input" id="t_fee" type="number" step="0.01" min="0" value="${t.base_fee_eur ?? 0}"><span class="hint">Nur für die Kostenübersicht</span></div>
           </div>
+          <div class="field" style="margin-top:4px"><label>Vergleich mit einem Festpreistarif</label>
+            <div class="form-grid"><div class="field" style="margin:0"><input class="input" id="t_cmp" type="number" step="0.01" min="0" value="${t.compare_price_ct ?? 32}"><span class="hint">Arbeitspreis brutto (ct/kWh)</span></div>
+            <div class="field" style="margin:0"><input class="input" id="t_cmpfee" type="number" step="0.01" min="0" value="${t.compare_base_fee_eur ?? 12}"><span class="hint">Grundpreis (€/Monat)</span></div></div></div>
           <div class="notice info" id="t_prev">${ic('info')}<div></div></div>
           <div class="row" style="margin-top:14px"><button class="btn primary" id="t_save">${ic('check')}Speichern</button></div>
         </div></div>
         <div class="card"><div class="card-head"><div class="avatar accent">${ic('target')}</div><h2>Aufschlag aus einem Preis berechnen</h2></div><div class="card-body">
-          <p class="explain">Trag einen Gesamtpreis aus der <b>sonnen-App</b> (oder von der Rechnung) ein – mit Tag und Uhrzeit der Viertelstunde. EnergyPilot sucht den Börsenpreis dieser Viertelstunde und rechnet den Aufschlag zurück. Mit zwei, drei Preisen zu verschiedenen Uhrzeiten siehst du auch, ob alles zusammenpasst.</p>
+          <p class="explain">Trag einen Gesamtpreis aus der <b>App deines Stromanbieters</b> (oder von der Rechnung) ein – mit Tag und Uhrzeit der Viertelstunde. EnergyPilot sucht den Börsenpreis dieser Viertelstunde und rechnet den Aufschlag zurück. Mit zwei, drei Preisen zu verschiedenen Uhrzeiten siehst du auch, ob alles zusammenpasst.</p>
           <div class="calib-head"><span>Tag</span><span>Uhrzeit</span><span>Gesamtpreis (ct/kWh)</span><span></span></div>
           <div id="c_rows"></div>
           <button type="button" class="btn sm" id="c_add">${ic('plus')}Weiteren Preis</button>
           <div id="c_result" style="margin-top:14px"></div>
         </div></div></div>`;
       // markup from sample prices: price / (1 + VAT) - spot price of that quarter hour
-      const calibRow = () => `<div class="calib-row" data-calib><input class="input" type="date" data-k="day" value="${localDay()}"><input class="input" type="time" step="900" data-k="time" value="08:15"><input class="input" type="number" step="0.01" data-k="price" placeholder="z. B. 42,87"><button type="button" class="icon-btn" data-del title="Entfernen">${ic('x')}</button></div>`;
+      const calibRow = () => `<div class="calib-row" data-calib><input class="input" type="date" data-k="day" value="${localDay()}"><input class="input" type="time" step="900" data-k="time" value="08:15"><input class="input" type="number" step="0.01" data-k="price" placeholder="z. B. 35,20"><button type="button" class="icon-btn" data-del title="Entfernen">${ic('x')}</button></div>`;
       const calcMarkup = async () => {
         const rows = $$('[data-calib]').map((r) => ({ day: r.querySelector('[data-k=day]').value, time: r.querySelector('[data-k=time]').value, price: Number(String(r.querySelector('[data-k=price]').value).replace(',', '.')) })).filter((r) => r.day && r.time && r.price > 0);
         const out = $('#c_result');
@@ -1256,7 +1320,7 @@
       };
       ['#t_markup', '#t_vat'].forEach((id) => $(id).addEventListener('input', prev));
       prev();
-      $('#t_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({ tariff: { bidding_zone: $('#t_zone').value, markup_ct: $('#t_markup').value, vat: $('#t_vat').value, feed_in_ct: $('#t_feed').value } })));
+      $('#t_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({ tariff: { bidding_zone: $('#t_zone').value, markup_ct: $('#t_markup').value, vat: $('#t_vat').value, feed_in_ct: $('#t_feed').value, base_fee_eur: $('#t_fee').value, compare_price_ct: $('#t_cmp').value, compare_base_fee_eur: $('#t_cmpfee').value } })));
     };
     draw();
   }
@@ -1266,7 +1330,7 @@
     const b = S.settings.battery;
     const f = (id, label, val, unit, hint, attrs = '') => `<div class="field"><label>${label}${unit ? ` (${unit})` : ''}</label><input class="input" id="${id}" type="number" ${attrs} value="${val}"><span class="hint">${hint}</span></div>`;
     el.innerHTML = `<div class="grid cols-2"><div class="card"><div class="card-head"><div class="avatar accent">${ic('battery')}</div><h2>Batterie</h2></div><div class="card-body">
-        <p class="explain">Die Werte stehen im Datenblatt bzw. in der App des Speichers (z. B. sonnenBatterie). Der Ladezustand kommt aus dem Sensor unter <a href="#/settings?tab=sensors">Sensoren</a>.</p>
+        <p class="explain">Die Werte stehen im Datenblatt bzw. in der App des Speichers. Der Ladezustand kommt aus dem Sensor unter <a href="#/settings?tab=sensors">Sensoren</a>.</p>
         <div class="form-grid">
           ${f('b_cap', 'Nutzbare Kapazität', b.capacity_kwh, 'kWh', 'z. B. 11', 'step="0.1" min="0.5"')}
           ${f('b_min', 'Reserve', b.min_soc, '%', 'unter diesen Ladezustand wird nicht entladen', 'step="1" min="0" max="90"')}
@@ -1313,9 +1377,11 @@
       <div class="card"><div class="card-head"><div class="avatar accent">${ic('sliders')}</div><h2>Sensoren</h2></div><div class="card-body">
         <div class="field"><label>Hausverbrauch</label>${entityPicker('n_house', ents, s.house, ['power', 'energy'])}${invBox('house')}<span class="hint">Gesamtverbrauch des Hauses (inklusive E-Auto und Heizstab) – Grundlage der Verbrauchsprognose. Erwartet wird ein positiver Wert.</span></div>
         <div class="field"><label>Netzleistung</label>${entityPicker('n_grid', ents, s.grid, ['power'])}${invBox('grid')}<span class="hint">Vom Smartmeter. EnergyPilot erwartet: positiv = Bezug, negativ = Einspeisung – sonst „Richtung umkehren“ anhaken.</span></div>
+        <div class="field"><label>Netzbezug <span class="faint">(optional)</span></label>${entityPicker('n_gin', ents, s.grid_import || '', ['power', 'energy'])}</div>
+        <div class="field"><label>Einspeisung <span class="faint">(optional)</span></label>${entityPicker('n_gout', ents, s.grid_export || '', ['power', 'energy'])}<span class="hint">Bezug und Einspeisung als eigene Sensoren sind für die Kostenübersicht genauer als die Netzleistung mit Vorzeichen – innerhalb einer Stunde heben sich Bezug und Einspeisung sonst gegenseitig auf. Viele Speicher und Smartmeter liefern beide Werte getrennt.</span></div>
         <div class="field"><label>Batterie Ladezustand</label>${entityPicker('n_soc', ents, s.battery_soc, ['percent'])}</div>
-        <div class="field"><label>Batterie Leistung</label>${entityPicker('n_bp', ents, s.battery_power, ['power'])}${invBox('battery_power')}<span class="hint">EnergyPilot erwartet: positiv = Laden, negativ = Entladen. Die sonnenBatterie meldet es meist umgekehrt – dann „Richtung umkehren“ anhaken.</span></div>
-        <div class="field"><label>E-Auto / Wallbox</label>${entityPicker('n_ev', ents, s.ev || '', ['power', 'energy'])}<span class="hint">Ladeleistung oder Ladezähler, z. B. aus evcc</span></div>
+        <div class="field"><label>Batterie Leistung</label>${entityPicker('n_bp', ents, s.battery_power, ['power'])}${invBox('battery_power')}<span class="hint">EnergyPilot erwartet: positiv = Laden, negativ = Entladen. Manche Speicher melden es umgekehrt – dann „Richtung umkehren“ anhaken.</span></div>
+        <div class="field"><label>E-Auto / Wallbox</label>${entityPicker('n_ev', ents, s.ev || '', ['power', 'energy'])}<span class="hint">Ladeleistung oder Ladezähler der Wallbox</span></div>
         <div class="field"><label>Heizstab</label>${entityPicker('n_heater', ents, s.heater || '', ['power', 'energy'])}<span class="hint">E-Auto und Heizstab werden vom Hausverbrauch abgezogen – die Verbrauchsprognose lernt nur den Grundverbrauch, die beiden plant EnergyPilot später gezielt.</span></div>
       </div></div>
       <div class="card"><div class="card-head"><div class="avatar accent">${ic('compass')}</div><h2>Standort</h2></div><div class="card-body">
@@ -1352,7 +1418,7 @@
     });
     consumptionCheck($('#consCheck'));
     $('#n_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({
-      sensors: { house: $('#n_house').value, grid: $('#n_grid').value, battery_soc: $('#n_soc').value, battery_power: $('#n_bp').value, ev: $('#n_ev').value, heater: $('#n_heater').value },
+      sensors: { house: $('#n_house').value, grid: $('#n_grid').value, battery_soc: $('#n_soc').value, battery_power: $('#n_bp').value, ev: $('#n_ev').value, heater: $('#n_heater').value, grid_import: $('#n_gin').value, grid_export: $('#n_gout').value },
       location: { latitude: $('#n_lat').value, longitude: $('#n_lon').value },
       invert: { house: $('#inv_house').checked, grid: $('#inv_grid').checked, battery_power: $('#inv_battery_power').checked },
     })));
@@ -1374,7 +1440,7 @@
     draw();
   }
 
-  const RENDER = { dashboard: renderDashboard, plan: renderPlan, journal: renderJournal, accuracy: renderAccuracy, day: renderDay, prices: renderPrices, settings: renderSettings };
+  const RENDER = { costs: renderCosts, dashboard: renderDashboard, plan: renderPlan, journal: renderJournal, accuracy: renderAccuracy, day: renderDay, prices: renderPrices, settings: renderSettings };
   // -------------------------------------------------------------- UI pieces
   function toast(msg, type = 'ok') {
     const el = document.createElement('div');

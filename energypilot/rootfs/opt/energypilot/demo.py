@@ -58,7 +58,7 @@ def populate(hub) -> None:
     if not settings.arrays:
         settings.upsert_array({"name": "Hausdach Süd", "planes": [{"kwp": 6.5, "tilt": 35, "azimuth": 185}],
                                "sensor": "sensor.wechselrichter_1_ac_leistung"})
-        settings.upsert_array({"name": "Garage Ost-West", "sensor": "sensor.wechselrichter_2_ac_leistung",
+        settings.upsert_array({"name": "Carport Ost-West", "sensor": "sensor.wechselrichter_2_ac_leistung",
                                "planes": [{"kwp": 2.6, "tilt": 15, "azimuth": 95},
                                           {"kwp": 2.6, "tilt": 15, "azimuth": 275}]})
         settings.update({"sensors": {"house": "sensor.hausverbrauch", "grid": "sensor.netzleistung",

@@ -208,6 +208,30 @@ class Hub:
             return
         self.db.put_prices(rows)
         self.mark("price", True, count=len(rows))
+        await self.backfill_prices()
+
+    async def backfill_prices(self) -> None:
+        """Past spot prices (once) so the cost overview can evaluate the backfilled measurements."""
+        today = datetime.now(self.tz).date()
+        first = today - timedelta(days=int(self.settings.data["backfill_days"]))
+        have = self.db.get_meta("prices_from")
+        if have and date.fromisoformat(have) <= first:
+            return
+        end = date.fromisoformat(have) if have else today
+        zone = self.settings.data["tariff"]["bidding_zone"]
+        cur = first
+        while cur < end:
+            stop = min(end - timedelta(days=1), cur + timedelta(days=30))
+            start_ts = analysis.day_start(cur.isoformat(), self.tz)
+            end_ts = analysis.day_start((stop + timedelta(days=1)).isoformat(), self.tz)
+            try:
+                rows = await prices.fetch(self.session, zone, start_ts, end_ts, cur.isoformat(), stop.isoformat())
+            except SourceError as err:
+                _LOGGER.info("Price history not available: %s", err)
+                return
+            self.db.put_prices(rows)
+            cur = stop + timedelta(days=1)
+        self.db.set_meta("prices_from", first.isoformat())
 
     # --------------------------------------------------------------- forecasts
     def _pv_rows(
@@ -381,6 +405,9 @@ class Hub:
         for key in ("house", "grid", "ev", "heater"):
             if sensors.get(key):
                 out[key] = sensors[key]
+        for key, series in (("grid_import", "grid_in"), ("grid_export", "grid_out")):
+            if sensors.get(key):
+                out[series] = sensors[key]
         return out
 
     async def update_actuals(self) -> None:
@@ -434,6 +461,111 @@ class Hub:
                     self.db.set_meta(f"actual:{sid}", str(now))
                     self.mark(f"act:{sid}", True, count=len(stats.get(sid, [])))
         self.mark("actual", True, count=total)
+
+    # ------------------------------------------------------------------- costs
+    def costs(self, start: int, end: int) -> dict:
+        """Electricity bill from the measured grid energy and the hourly prices, per local day."""
+        s = self.settings.data
+        sensors, inv, tariff = s["sensors"], s["invert"], s["tariff"]
+        acts: dict[str, dict[int, float]] = defaultdict(dict)
+        for series, t, wh in self.db.actuals(start, end):
+            acts[series][t] = wh
+        ids = [c["id"] for c in s["arrays"] if c["kwp"] > 0 and c.get("sensor")]
+        price_h: dict[int, list[float]] = defaultdict(list)
+        market: dict[str, list[float]] = defaultdict(list)
+        for slot in self.price_slots(start, end):
+            price_h[slot["ts"] // 3600 * 3600].append(slot["price"])
+            market[self.day_key(slot["ts"])].append(slot["price"])
+        grid_sign = -1.0 if inv.get("grid") else 1.0
+        house_sign = -1.0 if inv.get("house") else 1.0
+        days: dict[str, dict] = {}
+        for t in range(start, end, 3600):
+            imp = abs(acts["grid_in"][t]) / 1000 if sensors.get("grid_import") and t in acts.get("grid_in", {}) else None
+            exp = abs(acts["grid_out"][t]) / 1000 if sensors.get("grid_export") and t in acts.get("grid_out", {}) else None
+            if (imp is None or exp is None) and t in acts.get("grid", {}):
+                v = acts["grid"][t] * grid_sign / 1000
+                imp = max(0.0, v) if imp is None else imp
+                exp = max(0.0, -v) if exp is None else exp
+            if imp is None and exp is None:
+                continue
+            imp, exp = imp or 0.0, exp or 0.0
+            d = days.setdefault(self.day_key(t), {
+                "import_kwh": 0.0, "export_kwh": 0.0, "energy_ct": 0.0, "unpriced_kwh": 0.0,
+                "pv_kwh": 0.0, "house_kwh": 0.0, "hours": 0,
+            })
+            d["hours"] += 1
+            d["import_kwh"] += imp
+            d["export_kwh"] += exp
+            if price_h.get(t):
+                d["energy_ct"] += imp * sum(price_h[t]) / len(price_h[t])
+            else:
+                d["unpriced_kwh"] += imp
+            if ids and all(t in acts.get(i, {}) for i in ids):
+                d["pv_kwh"] += sum(max(0.0, acts[i][t]) for i in ids) / 1000
+            if t in acts.get("house", {}):
+                d["house_kwh"] += max(0.0, acts["house"][t] * house_sign) / 1000
+        fee_day = float(tariff.get("base_fee_eur", 0)) * 12 / 365
+        cmp_fee_day = float(tariff.get("compare_base_fee_eur", 0)) * 12 / 365
+        feed = float(tariff.get("feed_in_ct", 0))
+        cmp_price = float(tariff.get("compare_price_ct", 0))
+        out_days = []
+        tot = defaultdict(float)
+        for day, d in sorted(days.items()):
+            priced = d["import_kwh"] - d["unpriced_kwh"]
+            row = {
+                "day": day,
+                "hours": d["hours"],
+                "import_kwh": round(d["import_kwh"], 2),
+                "export_kwh": round(d["export_kwh"], 2),
+                "pv_kwh": round(d["pv_kwh"], 2),
+                "house_kwh": round(d["house_kwh"], 2),
+                "energy_eur": round(d["energy_ct"] / 100, 2),
+                "fee_eur": round(fee_day, 2),
+                "feed_in_eur": round(d["export_kwh"] * feed / 100, 2),
+                "avg_paid_ct": round(d["energy_ct"] / priced, 2) if priced > 0.05 else None,
+                "avg_market_ct": round(sum(market[day]) / len(market[day]), 2) if market.get(day) else None,
+                "unpriced_kwh": round(d["unpriced_kwh"], 2),
+                "compare_eur": round((d["import_kwh"] * cmp_price) / 100 + cmp_fee_day, 2),
+            }
+            row["total_eur"] = round(row["energy_eur"] + row["fee_eur"] - row["feed_in_eur"], 2)
+            row["compare_total_eur"] = round(row["compare_eur"] - row["feed_in_eur"], 2)
+            out_days.append(row)
+            for k in ("import_kwh", "export_kwh", "pv_kwh", "house_kwh", "energy_eur", "fee_eur", "feed_in_eur",
+                      "total_eur", "compare_total_eur", "unpriced_kwh"):
+                tot[k] += row[k]
+            tot["energy_ct"] += d["energy_ct"]
+            tot["priced_kwh"] += priced
+            tot["market_sum"] += sum(market.get(day, []))
+            tot["market_n"] += len(market.get(day, []))
+        totals = {k: round(v, 2) for k, v in tot.items() if k not in ("energy_ct", "priced_kwh", "market_sum", "market_n")}
+        totals["days"] = len(out_days)
+        totals["avg_paid_ct"] = round(tot["energy_ct"] / tot["priced_kwh"], 2) if tot["priced_kwh"] > 0.05 else None
+        totals["avg_market_ct"] = round(tot["market_sum"] / tot["market_n"], 2) if tot["market_n"] else None
+        totals["savings_eur"] = round(tot["compare_total_eur"] - tot["total_eur"], 2)
+        if tot["house_kwh"] > 0:
+            totals["autarky_pct"] = round(max(0.0, 1 - tot["import_kwh"] / tot["house_kwh"]) * 100, 1)
+        if tot["pv_kwh"] > 0:
+            totals["self_use_pct"] = round(max(0.0, 1 - tot["export_kwh"] / tot["pv_kwh"]) * 100, 1)
+        return {
+            "days": out_days,
+            "totals": totals,
+            "split": bool(sensors.get("grid_import") and sensors.get("grid_export")),
+            "has_grid": bool(sensors.get("grid") or sensors.get("grid_import")),
+            "tariff": {k: tariff.get(k) for k in ("base_fee_eur", "compare_price_ct", "compare_base_fee_eur", "feed_in_ct")},
+        }
+
+    def cost_months(self, count: int = 12) -> list[dict]:
+        """Totals per calendar month, newest first."""
+        today = datetime.now(self.tz).date().replace(day=1)
+        out = []
+        for i in range(count):
+            y, m = divmod(today.month - 1 - i, 12)
+            first = date(today.year + y, m + 1, 1)
+            nxt = date(first.year + (first.month == 12), first.month % 12 + 1, 1)
+            res = self.costs(analysis.day_start(first.isoformat(), self.tz), analysis.day_start(nxt.isoformat(), self.tz))
+            if res["totals"]["days"]:
+                out.append({"month": first.strftime("%Y-%m"), **res["totals"]})
+        return out
 
     # ---------------------------------------------------------------- geometry
     def check_geometry(self, array_id: str) -> dict:
