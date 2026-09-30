@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2
+
+- PV-Anlagen: optional eine eigene Einspeisevergütung je Anlage. Da es nur einen Zähler für die Einspeisung gibt, wird sie aufgeteilt – nach Anlagenleistung (kWp, Standard) oder nach der gemessenen Erzeugung jeder Anlage (Einstellungen › Strompreis › „Einspeisung aufteilen“)
+- Kosten und Protokoll bewerten die Einspeisung jeder Stunde mit dem passenden Satz; die Planung rechnet mit dem nach kWp gewichteten Mittel. Die Einrichtung zeigt die Vergütung je Anlage
+
 ## 0.6.1
 
 - Kosten: Der dynamische Tarif lässt sich wahlweise mit einem Festpreistarif oder mit einer **Flat mit Freistrom** vergleichen (Einstellungen › Strompreis › „Vergleichen mit“). Für die Flat: Grundgebühr, Freistrom pro Jahr, Preis über dem Freistrom, eigene Einspeisevergütung und Beginn des Abrechnungsjahres

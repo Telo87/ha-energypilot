@@ -1014,7 +1014,7 @@
       <div class="grid kpis">
         ${kpi('wallet', '', 'Stromkosten', `${cnt('ct', nf(t.total_eur, 2))}<small>€</small>`, `Netzbezug ${eur(t.energy_eur)} + Grundgebühr ${eur(t.fee_eur)} − Einspeisung ${eur(t.feed_in_eur)}${t.days < 28 ? ` · ${t.days} Tage` : ''}`)}
         ${kpi('euro', better != null && better > 0 ? 'ok' : 'warn', 'Ø bezahlter Preis', t.avg_paid_ct == null ? '–' : `${cnt('cp', nf(t.avg_paid_ct, 1))}<small>ct/kWh</small>`, t.avg_market_ct == null ? '' : `Ø aller Viertelstunden ${nf(t.avg_market_ct, 1)} ct${better != null ? ` · ${better >= 0 ? `${nf(better, 1)} ct günstiger gekauft` : `${nf(-better, 1)} ct teurer gekauft`}` : ''}`)}
-        ${kpi('plug', '', 'Netzbezug', `${cnt('ci', nf(t.import_kwh, 0))}<small>kWh</small>`, `Einspeisung ${nf(t.export_kwh, 0)} kWh${tf.feed_in_ct ? ` à ${nf(tf.feed_in_ct, 2)} ct` : ' – Vergütung in den Einstellungen eintragen'}`)}
+        ${kpi('plug', '', 'Netzbezug', `${cnt('ci', nf(t.import_kwh, 0))}<small>kWh</small>`, `Einspeisung ${nf(t.export_kwh, 0)} kWh${d.feed_in.avg_ct ? ` à ${d.feed_in.per_array && t.export_kwh > 0.05 ? `Ø ${nf(t.feed_in_eur / t.export_kwh * 100, 2)}` : nf(d.feed_in.avg_ct, 2)} ct` : ' – Vergütung in den Einstellungen eintragen'}`)}
         ${kpi('trophy', t.savings_eur >= 0 ? 'ok' : 'err', t.savings_eur >= 0 ? `Gespart ggü. ${cmpName}` : `Mehrkosten ggü. ${cmpName}`, `${cnt('cs', nf(Math.abs(t.savings_eur), 2))}<small>€</small>`, `${cmpText} wäre${isFlat ? '' : 'n'} ${eur(t.compare_total_eur)} gewesen`)}
         ${t.autarky_pct != null ? kpi('home', 'up', 'Autarkie', `${cnt('ca', nf(t.autarky_pct, 0))}<small>%</small>`, `des Hausverbrauchs aus eigener Erzeugung${t.self_use_pct != null ? ` · Eigenverbrauch ${nf(t.self_use_pct, 0)} % der PV` : ''}`) : ''}
       </div>
@@ -1183,7 +1183,7 @@
       el.innerHTML = `<div class="card"><div class="card-head"><h2>PV-Anlagen <span class="sub">${arrays.length}</span></h2><button class="btn primary sm" id="addArr">${ic('plus')}Anlage hinzufügen</button></div>
         <div class="card-body flush"><div class="list">${arrays.map((a) => `<div class="list-item clickable" data-edit="${a.id}">
             <div class="avatar accent">${ic('solar')}</div>
-            <div class="grow"><div class="title">${esc(a.name)}</div><div class="meta">${nf(a.kwp, 2)} kWp · ${planesText(a)}${a.ac_max_kw ? ` · max. ${nf(a.ac_max_kw, 1)} kW` : ''} · ${a.sensor ? `<span class="mono">${esc(a.sensor)}</span>` : '<span class="pos">kein Messsensor</span>'}</div></div>
+            <div class="grow"><div class="title">${esc(a.name)}</div><div class="meta">${nf(a.kwp, 2)} kWp · ${planesText(a)}${a.ac_max_kw ? ` · max. ${nf(a.ac_max_kw, 1)} kW` : ''}${a.feed_in_ct != null ? ` · Einspeisung ${nf(a.feed_in_ct, 2)} ct` : ''} · ${a.sensor ? `<span class="mono">${esc(a.sensor)}</span>` : '<span class="pos">kein Messsensor</span>'}</div></div>
             ${a.sensor ? `<button class="btn sm" data-geo="${a.id}" title="Aus den Messwerten prüfen, ob Ausrichtung und Neigung stimmen">${ic('compass')}<span class="hide-sm">Ausrichtung prüfen</span></button>` : ''}
             <button class="icon-btn" title="Bearbeiten">${ic('edit')}</button></div>`).join('')
           || '<div class="muted" style="padding:6px 18px 14px;font-size:13px">Noch keine Anlage. Lege für jeden Messsensor (meist ein Wechselrichter) eine Anlage an. Zeigen Module an einem Wechselrichter in verschiedene Richtungen – z. B. ein String nach Osten, einer nach Westen –, trägst du sie als Teilflächen derselben Anlage ein.</div>'}</div></div></div>
@@ -1232,6 +1232,7 @@
         body: `<div class="form-grid">
           <div class="field span-2"><label>Name</label><input class="input" id="a_name" value="${esc(cfg.name || '')}" placeholder="z. B. Hausdach Süd oder Carport"></div>
           <div class="field span-2"><label>Messsensor (Wechselrichter)</label>${entityPicker('a_sensor', ents, cfg.sensor || '', ['power', 'energy'])}<span class="hint">Leistung (W/kW) oder Energiezähler (Wh/kWh) – er misst alle Teilflächen unten zusammen</span></div>
+          <div class="field span-2"><label>Einspeisevergütung (ct/kWh) <span class="faint">(optional)</span></label><input class="input" id="a_feed" type="number" step="0.01" min="0" value="${cfg.feed_in_ct ?? ''}" placeholder="wie unter Strompreis (${nf(S.settings.tariff.feed_in_ct, 2)} ct)"><span class="hint">Nur nötig, wenn diese Anlage eine andere Vergütung hat als die übrigen</span></div>
         </div>
         <div class="field"><label>Teilflächen</label>
           <div class="plane-head"><span>Leistung (kWp)</span><span>Neigung (°)</span><span>Ausrichtung</span><span></span></div>
@@ -1289,7 +1290,7 @@
           syncAll();
           v('#a_save').addEventListener('click', (e) => withBusy(e.currentTarget, async () => {
             const pl = planes();
-            const body = { id: cfg.id, name: v('#a_name').value.trim(), planes: pl, sensor: v('#a_sensor').value, efficiency: Number(v('#a_eff').value) / 100, ac_max_kw: v('#a_ac').value || 0, solcast_id: v('#a_sc').value.trim() };
+            const body = { id: cfg.id, name: v('#a_name').value.trim(), planes: pl, sensor: v('#a_sensor').value, efficiency: Number(v('#a_eff').value) / 100, ac_max_kw: v('#a_ac').value || 0, solcast_id: v('#a_sc').value.trim(), feed_in_ct: v('#a_feed').value.trim() };
             if (!pl.length || pl.some((p) => !(p.kwp > 0))) { toast('Bitte für jede Teilfläche die Leistung in kWp angeben.', 'err'); return; }
             try {
               await api('arrays', { method: 'POST', body });
@@ -1347,6 +1348,7 @@
   async function renderTariff(el) {
     setHeader('Einstellungen', 'Dynamischer Stromtarif');
     const t = S.settings.tariff;
+    const ownFeed = S.settings.arrays.filter((a) => a.kwp > 0 && a.feed_in_ct != null);
     if (!S.overview) { try { S.overview = await api('overview'); } catch { /* example uses a placeholder */ } }
     const draw = () => {
       el.innerHTML = `<div class="grid cols-2">
@@ -1356,7 +1358,8 @@
             <div class="field"><label>Gebotszone</label><input class="input" id="t_zone" list="t_zones" value="${esc(t.bidding_zone)}"><datalist id="t_zones"><option value="DE-LU"><option value="AT"><option value="CH"><option value="NL"><option value="BE"><option value="FR"></datalist><span class="hint">Deutschland: DE-LU</span></div>
             <div class="field"><label>Aufschlag netto (ct/kWh)</label><input class="input" id="t_markup" type="number" step="0.01" min="0" value="${t.markup_ct}"><span class="hint">Summe aller festen Preisbestandteile ohne MwSt</span></div>
             <div class="field"><label>Mehrwertsteuer (%)</label><input class="input" id="t_vat" type="number" step="0.1" min="0" value="${t.vat}"></div>
-            <div class="field"><label>Einspeisevergütung (ct/kWh)</label><input class="input" id="t_feed" type="number" step="0.01" min="0" value="${t.feed_in_ct}"><span class="hint">Für Planung und Kostenübersicht</span></div>
+            <div class="field"><label>Einspeisevergütung (ct/kWh)</label><input class="input" id="t_feed" type="number" step="0.01" min="0" value="${t.feed_in_ct}"><span class="hint">${ownFeed.length ? 'Für alle Anlagen ohne eigene Vergütung' : 'Für Planung und Kostenübersicht – eine eigene Vergütung je Anlage stellst du bei der Anlage ein'}</span></div>
+            ${ownFeed.length ? `<div class="field span-2"><label>Einspeisung aufteilen</label><div class="seg" id="t_split">${[['kwp', 'nach Anlagenleistung (kWp)'], ['production', 'nach gemessener Erzeugung']].map(([v, l]) => `<button type="button" data-v="${v}" class="${(t.feed_in_split || 'kwp') === v ? 'active' : ''}">${l}</button>`).join('')}</div><span class="hint">Eigene Vergütung: ${ownFeed.map((a) => `${esc(a.name)} ${nf(a.feed_in_ct, 2)} ct`).join(' · ')}. Für die eingespeiste Energie gibt es nur einen Zähler – meist teilt der Netzbetreiber sie nach Anlagenleistung auf.</span></div>` : ''}
             <div class="field"><label>Grundgebühr (€/Monat)</label><input class="input" id="t_fee" type="number" step="0.01" min="0" value="${t.base_fee_eur ?? 0}"><span class="hint">Nur für die Kostenübersicht</span></div>
           </div>
           <div class="field" style="margin-top:4px"><label>Vergleichen mit</label>
@@ -1427,7 +1430,9 @@
       const showType = () => { $('#t_fixed').classList.toggle('hidden', ctype() !== 'fixed'); $('#t_flat').classList.toggle('hidden', ctype() !== 'flat'); };
       $$('#t_ctype button').forEach((btn) => btn.addEventListener('click', () => { $$('#t_ctype button').forEach((x) => x.classList.toggle('active', x === btn)); showType(); }));
       showType();
-      $('#t_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({ tariff: { bidding_zone: $('#t_zone').value, markup_ct: $('#t_markup').value, vat: $('#t_vat').value, feed_in_ct: $('#t_feed').value, base_fee_eur: $('#t_fee').value, compare_price_ct: $('#t_cmp').value, compare_base_fee_eur: $('#t_cmpfee').value,
+      $$('#t_split button').forEach((btn) => btn.addEventListener('click', () => { $$('#t_split button').forEach((x) => x.classList.toggle('active', x === btn)); }));
+      $('#t_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({ tariff: { bidding_zone: $('#t_zone').value,
+        feed_in_split: ($('#t_split button.active') || { dataset: { v: t.feed_in_split || 'kwp' } }).dataset.v, markup_ct: $('#t_markup').value, vat: $('#t_vat').value, feed_in_ct: $('#t_feed').value, base_fee_eur: $('#t_fee').value, compare_price_ct: $('#t_cmp').value, compare_base_fee_eur: $('#t_cmpfee').value,
         compare_type: ctype(), flat_fee_eur: $('#t_ffee').value, flat_free_kwh: $('#t_ffree').value, flat_price_ct: $('#t_fprice').value, flat_feed_in_ct: $('#t_ffeed').value, flat_year_start: $('#t_fstart').value } })));
     };
     draw();

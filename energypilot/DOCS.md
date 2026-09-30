@@ -150,6 +150,11 @@ Die Seite **Kosten** rechnet aus dem gemessenen Netzbezug jeder Stunde und dem P
 der Viertelstundenpreise) die tatsächlichen Stromkosten – pro Tag und Monat, plus anteilige Grundgebühr,
 abzüglich Einspeisevergütung (Einstellungen › Strompreis). Dazu:
 
+- **Eigene Einspeisevergütung je Anlage** (bei der PV-Anlage, optional): Hängen Anlagen mit unterschiedlicher
+  Vergütung an einem Zähler, wird die eingespeiste Energie aufgeteilt – nach Anlagenleistung (kWp, wie es
+  Netzbetreiber meist tun) oder nach der gemessenen Erzeugung jeder Anlage in der jeweiligen Stunde
+  (Einstellungen › Strompreis › „Einspeisung aufteilen“).
+
 - **Ø bezahlter Preis** gegenüber dem Durchschnitt aller Viertelstunden: liegt er darunter, wird eher in
   günstigen Stunden gekauft – genau das sollen Akku und Planung bewirken.
 - **Vergleich mit einem anderen Tarif**, wahlweise:

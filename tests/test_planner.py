@@ -356,3 +356,21 @@ def test_flat_tariff_uses_free_amount_from_the_billing_year_start(tmp_path):
     hub.settings.update({"tariff": {"flat_free_kwh": 0}})
     day = hub.costs(first, hub.midnight(first + 3 * 86400 + 7200))["days"][0]
     assert day["compare_total_eur"] == round(30 * 12 / 365 + 5.75 * 0.40 - 1.0 * 0.05, 2)
+
+
+def test_feed_in_per_array_split_by_kwp_or_production(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"sensors": {"grid": "sensor.grid"}, "tariff": {"feed_in_ct": 8.0}})
+    settings.upsert_array({"name": "Dach", "planes": [{"kwp": 6}], "sensor": "sensor.a"})
+    settings.upsert_array({"name": "Garage", "planes": [{"kwp": 2}], "sensor": "sensor.b", "feed_in_ct": 12.0})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    a, b = (c["id"] for c in hub.settings.arrays)
+    assert hub.feed_in_avg() == pytest.approx((6 * 8 + 2 * 12) / 8)  # 9 ct by kWp
+    t = int(time.time()) // 3600 * 3600 - 7200
+    hub.db.put_actual([("grid", t, -1000.0), (a, t, 1000.0), (b, t, 3000.0)])  # 1 kWh export, garage produced 3/4
+    by_kwp = hub.costs(t, t + 3600)["days"][0]["feed_in_eur"]
+    hub.settings.update({"tariff": {"feed_in_split": "production"}})
+    by_prod = hub.costs(t, t + 3600)["days"][0]["feed_in_eur"]
+    assert by_kwp == pytest.approx(0.09) and by_prod == pytest.approx(0.11)  # 1/4 * 8 + 3/4 * 12
+    hub.settings.upsert_array({"id": b, "feed_in_ct": ""})  # back to the tariff's payment
+    assert hub.settings.arrays[1]["feed_in_ct"] is None and hub.feed_in_avg() == 8.0

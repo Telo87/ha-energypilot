@@ -77,7 +77,9 @@ DEFAULT_SETTINGS: dict = {
         "bidding_zone": "DE-LU",
         "markup_ct": 0.0,  # net surcharge on top of the spot price (grid fees, levies, provider)
         "vat": 19.0,
-        "feed_in_ct": 0.0,
+        "feed_in_ct": 0.0,  # for all arrays without their own feed-in payment
+        # several arrays with their own payment behind one meter: split the export by "kwp" or by "production"
+        "feed_in_split": "kwp",
         "base_fee_eur": 0.0,  # monthly base fee - only for the cost overview
         # tariff to compare the dynamic one with: "fixed" price or "flat" with free kWh per year
         "compare_type": "fixed",
@@ -126,6 +128,7 @@ _ARRAY_DEFAULTS = {
     "ac_max_kw": 0.0,
     "sensor": "",  # power (W/kW) or energy (Wh/kWh) sensor of this array's inverter
     "solcast_id": "",
+    "feed_in_ct": None,  # own feed-in payment of this array, None = the one of the tariff
 }
 
 
@@ -177,6 +180,9 @@ def clean_array(data: dict, existing: dict | None = None) -> dict:
         arr["ac_max_kw"] = _num(data["ac_max_kw"], arr["ac_max_kw"], 0, 1000)
     if "sensor" in data:
         arr["sensor"] = _entity(data["sensor"])
+    if "feed_in_ct" in data:
+        v = data["feed_in_ct"]
+        arr["feed_in_ct"] = None if v in (None, "") else _num(v, 0.0, 0, 100)
     if "solcast_id" in data:
         arr["solcast_id"] = re.sub(r"[^a-z0-9-]", "", str(data["solcast_id"] or "").lower())[:40]
     if not arr["name"]:
@@ -298,6 +304,8 @@ class Settings:
                                 ("flat_free_kwh", 100000), ("flat_price_ct", 200), ("flat_feed_in_ct", 100)):
                     if key in tariff:
                         t[key] = _num(tariff[key], t[key], 0, hi)
+                if tariff.get("feed_in_split") in ("kwp", "production"):
+                    t["feed_in_split"] = tariff["feed_in_split"]
                 if tariff.get("compare_type") in ("fixed", "flat"):
                     t["compare_type"] = tariff["compare_type"]
                 if "flat_year_start" in tariff:

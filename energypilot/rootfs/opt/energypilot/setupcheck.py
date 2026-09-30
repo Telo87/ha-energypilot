@@ -251,7 +251,11 @@ async def run(hub: Hub) -> dict:
     vat = float(tariff["vat"])
     pr.append(_c("ok" if vat in (0, 7, 19, 20, 21, 8.1, 9, 10) else "warn", f"Mehrwertsteuer {vat:g} %", "" if vat else "0 % – nur richtig, wenn der Tarif ohne MwSt abgerechnet wird.", LINK["tariff"]))
     feed = float(tariff["feed_in_ct"])
-    if feed <= 0:
+    own = [(a["name"], a["feed_in_ct"]) for a in s["arrays"] if a["kwp"] > 0 and a.get("feed_in_ct") is not None]
+    if own:
+        split = "nach gemessener Erzeugung" if tariff.get("feed_in_split") == "production" else "nach Anlagenleistung (kWp)"
+        pr.append(_c("ok", "Einspeisevergütung je Anlage", " · ".join(f"{n}: {v:.2f} ct" for n, v in own) + f" – Einspeisung wird {split} aufgeteilt"))
+    elif feed <= 0:
         pr.append(_c("info", "Keine Einspeisevergütung eingetragen", "Planung und Kostenübersicht rechnen eingespeisten Strom dann mit 0 ct.", LINK["tariff"]))
     elif feed > 30:
         pr.append(_c("warn", "Einspeisevergütung ungewöhnlich hoch", f"{feed:.2f} ct/kWh – bitte prüfen.", LINK["tariff"]))

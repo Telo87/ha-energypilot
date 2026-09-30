@@ -482,6 +482,32 @@ class Hub:
             return None
         return imp or 0.0, exp or 0.0
 
+    def feed_in_avg(self) -> float:
+        """Feed-in payment in ct/kWh, weighted by the arrays' kWp (arrays can have their own)."""
+        default = float(self.settings.data["tariff"].get("feed_in_ct", 0))
+        arrs = [(c["kwp"], c.get("feed_in_ct")) for c in self.settings.arrays if c["kwp"] > 0]
+        total = sum(k for k, _ in arrs)
+        if not total or all(r is None for _, r in arrs):
+            return default
+        return sum(k * (default if r is None else r) for k, r in arrs) / total
+
+    def feed_in_rate(self, acts: dict[str, dict[int, float]]):
+        """ct/kWh for the export of an hour. One meter for arrays with different payments: the export
+        is split by kWp, or - if chosen - by what each array produced in that hour."""
+        default = float(self.settings.data["tariff"].get("feed_in_ct", 0))
+        avg = self.feed_in_avg()
+        cfgs = [c for c in self.settings.arrays if c["kwp"] > 0]
+        if self.settings.data["tariff"].get("feed_in_split") != "production" or all(c.get("feed_in_ct") is None for c in cfgs):
+            return lambda _t: avg
+
+        def rate(t: int) -> float:
+            prod = [max(0.0, acts.get(c["id"], {}).get(t, -1.0)) if t in acts.get(c["id"], {}) else None for c in cfgs]
+            if any(p is None for p in prod) or sum(prod) <= 0:
+                return avg  # no production values (e.g. night) - by kWp
+            return sum(p * (default if c.get("feed_in_ct") is None else c["feed_in_ct"]) for p, c in zip(prod, cfgs, strict=True)) / sum(prod)
+
+        return rate
+
     def costs(self, start: int, end: int) -> dict:
         """Electricity bill from the measured grid energy and the hourly prices, per local day."""
         s = self.settings.data
@@ -498,6 +524,7 @@ class Hub:
             if slot["ts"] + slot["dur"] <= now:  # only what could have been bought already
                 market[self.day_key(slot["ts"])].append(slot["price"])
         house_sign = self._house_sign(acts)
+        rate = self.feed_in_rate(acts)
         days: dict[str, dict] = {}
         for t in range(start, end, 3600):
             g = self._grid_kwh(acts, t)
@@ -506,11 +533,12 @@ class Hub:
             imp, exp = g
             d = days.setdefault(self.day_key(t), {
                 "import_kwh": 0.0, "export_kwh": 0.0, "energy_ct": 0.0, "unpriced_kwh": 0.0,
-                "pv_kwh": 0.0, "house_kwh": 0.0, "hours": 0,
+                "pv_kwh": 0.0, "house_kwh": 0.0, "hours": 0, "feed_ct": 0.0,
             })
             d["hours"] += 1
             d["import_kwh"] += imp
             d["export_kwh"] += exp
+            d["feed_ct"] += exp * rate(t)
             if price_h.get(t):
                 d["energy_ct"] += imp * sum(price_h[t]) / len(price_h[t])
             else:
@@ -520,14 +548,13 @@ class Hub:
             if t in acts.get("house", {}):
                 d["house_kwh"] += max(0.0, acts["house"][t] * house_sign) / 1000
         fee_day = float(tariff.get("base_fee_eur", 0)) * 12 / 365
-        feed = float(tariff.get("feed_in_ct", 0))
         flat = self.flat_usage(start, end) if tariff.get("compare_type") == "flat" else None
         if flat:
             cmp_fee_day = float(tariff.get("flat_fee_eur", 0)) * 12 / 365
             cmp_feed = float(tariff.get("flat_feed_in_ct", 0))
-        else:
+        else:  # a fixed-price tariff keeps the same feed-in payment
             cmp_fee_day = float(tariff.get("compare_base_fee_eur", 0)) * 12 / 365
-            cmp_feed = feed
+            cmp_feed = None
         cmp_price = float(tariff.get("flat_price_ct" if flat else "compare_price_ct", 0))
         out_days = []
         tot = defaultdict(float)
@@ -542,7 +569,7 @@ class Hub:
                 "house_kwh": round(d["house_kwh"], 2),
                 "energy_eur": round(d["energy_ct"] / 100, 2),
                 "fee_eur": round(fee_day, 2),
-                "feed_in_eur": round(d["export_kwh"] * feed / 100, 2),
+                "feed_in_eur": round(d["feed_ct"] / 100, 2),
                 "avg_paid_ct": round(d["energy_ct"] / priced, 2) if priced > 0.05 else None,
                 "avg_market_ct": round(sum(market[day]) / len(market[day]), 2) if market.get(day) else None,
                 "unpriced_kwh": round(d["unpriced_kwh"], 2),
@@ -550,7 +577,7 @@ class Hub:
                 "compare_eur": round(((flat["excess"].get(day, 0.0) if flat else d["import_kwh"]) * cmp_price) / 100 + cmp_fee_day, 2),
             }
             row["total_eur"] = round(row["energy_eur"] + row["fee_eur"] - row["feed_in_eur"], 2)
-            row["compare_total_eur"] = round(row["compare_eur"] - d["export_kwh"] * cmp_feed / 100, 2)
+            row["compare_total_eur"] = round(row["compare_eur"] - (d["feed_ct"] if cmp_feed is None else d["export_kwh"] * cmp_feed) / 100, 2)
             out_days.append(row)
             for k in ("import_kwh", "export_kwh", "pv_kwh", "house_kwh", "energy_eur", "fee_eur", "feed_in_eur",
                       "total_eur", "compare_total_eur", "unpriced_kwh"):
@@ -577,6 +604,8 @@ class Hub:
                 "base_fee_eur", "compare_type", "compare_price_ct", "compare_base_fee_eur", "feed_in_ct",
                 "flat_fee_eur", "flat_free_kwh", "flat_price_ct", "flat_feed_in_ct", "flat_year_start")},
             "flat": {k: v for k, v in flat.items() if k != "excess"} if flat else None,
+            "feed_in": {"avg_ct": round(self.feed_in_avg(), 2),
+                        "per_array": any(c.get("feed_in_ct") is not None for c in s["arrays"] if c["kwp"] > 0)},
         }
 
     def flat_usage(self, start: int, end: int) -> dict:
@@ -937,7 +966,7 @@ class Hub:
         }
         if not hours:
             return {**base, "ok": False, "reason": "Noch keine Strompreise für die nächsten Stunden."}
-        feed_in = float(self.settings.data["tariff"].get("feed_in_ct", 0))
+        feed_in = self.feed_in_avg()
         plan = planner.optimize(hours, soc_kwh, b, feed_in)
         cap = b.capacity_kwh
         steps = [
@@ -1047,7 +1076,8 @@ class Hub:
             return None
 
         b = self.battery()
-        feed_in = float(self.settings.data["tariff"].get("feed_in_ct", 0))
+        feed_in = self.feed_in_avg()  # for the plans; the bills use the payment of each hour
+        rate = self.feed_in_rate(acts)
         cap = b.capacity_kwh
 
         def price(t: int) -> float:
@@ -1056,10 +1086,10 @@ class Hub:
         def bill(imp_by_hour: dict[int, float], exp_by_hour: dict[int, float]) -> dict:
             """What was bought and fed in - without any credit for the energy left in the battery."""
             imp_ct = sum(v * price(t) for t, v in imp_by_hour.items())
-            exp = sum(exp_by_hour.values())
-            return {"import_kwh": round(sum(imp_by_hour.values()), 2), "export_kwh": round(exp, 2),
-                    "import_eur": round(imp_ct / 100, 2), "export_eur": round(exp * feed_in / 100, 2),
-                    "total_eur": round((imp_ct - exp * feed_in) / 100, 2)}
+            exp_ct = sum(v * rate(t) for t, v in exp_by_hour.items())
+            return {"import_kwh": round(sum(imp_by_hour.values()), 2), "export_kwh": round(sum(exp_by_hour.values()), 2),
+                    "import_eur": round(imp_ct / 100, 2), "export_eur": round(exp_ct / 100, 2),
+                    "total_eur": round((imp_ct - exp_ct) / 100, 2)}
 
         def absorb(plan: planner.Plan) -> float:
             """The surplus heating rod takes part of the simulated export (at most what it really used)."""
