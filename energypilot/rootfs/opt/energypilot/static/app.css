@@ -715,3 +715,10 @@ a.notice.setup-hint:hover { filter: brightness(.97); }
 .tb-label:not(:first-child) { margin-left: 8px; }
 
 .table tr.strong td { background: var(--surface-2); }
+
+/* feed-in payment per array */
+.field.unused .input { opacity: .55; }
+.field label .badge { margin-left: 6px; font-weight: 600; }
+.feed-rates { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; margin-top: 8px; }
+.feed-explain { margin: 6px 0 0; padding-left: 18px; line-height: 1.5; }
+.feed-explain li + li { margin-top: 4px; }

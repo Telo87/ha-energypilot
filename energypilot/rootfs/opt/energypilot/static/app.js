@@ -1232,7 +1232,7 @@
         body: `<div class="form-grid">
           <div class="field span-2"><label>Name</label><input class="input" id="a_name" value="${esc(cfg.name || '')}" placeholder="z. B. Hausdach Süd oder Carport"></div>
           <div class="field span-2"><label>Messsensor (Wechselrichter)</label>${entityPicker('a_sensor', ents, cfg.sensor || '', ['power', 'energy'])}<span class="hint">Leistung (W/kW) oder Energiezähler (Wh/kWh) – er misst alle Teilflächen unten zusammen</span></div>
-          <div class="field span-2"><label>Einspeisevergütung (ct/kWh) <span class="faint">(optional)</span></label><input class="input" id="a_feed" type="number" step="0.01" min="0" value="${cfg.feed_in_ct ?? ''}" placeholder="wie unter Strompreis (${nf(S.settings.tariff.feed_in_ct, 2)} ct)"><span class="hint">Nur nötig, wenn diese Anlage eine andere Vergütung hat als die übrigen</span></div>
+          <div class="field span-2"><label>Einspeisevergütung (ct/kWh) <span class="faint">(optional)</span></label><input class="input" id="a_feed" type="number" step="0.01" min="0" value="${cfg.feed_in_ct ?? ''}" placeholder="wie unter Strompreis (${nf(S.settings.tariff.feed_in_ct, 2)} ct)"><span class="hint">Nur nötig, wenn diese Anlage eine andere Vergütung hat. Leer = Wert unter Einstellungen › Strompreis; eingetragen ersetzt er diesen Wert für diese Anlage.</span></div>
         </div>
         <div class="field"><label>Teilflächen</label>
           <div class="plane-head"><span>Leistung (kWp)</span><span>Neigung (°)</span><span>Ausrichtung</span><span></span></div>
@@ -1348,7 +1348,10 @@
   async function renderTariff(el) {
     setHeader('Einstellungen', 'Dynamischer Stromtarif');
     const t = S.settings.tariff;
-    const ownFeed = S.settings.arrays.filter((a) => a.kwp > 0 && a.feed_in_ct != null);
+    const pvArrays = S.settings.arrays.filter((a) => a.kwp > 0);
+    const ownFeed = pvArrays.filter((a) => a.feed_in_ct != null);
+    const tariffFeed = pvArrays.filter((a) => a.feed_in_ct == null);  // arrays that use the payment below
+    const feedUnused = ownFeed.length > 0 && !tariffFeed.length;
     if (!S.overview) { try { S.overview = await api('overview'); } catch { /* example uses a placeholder */ } }
     const draw = () => {
       el.innerHTML = `<div class="grid cols-2">
@@ -1358,8 +1361,16 @@
             <div class="field"><label>Gebotszone</label><input class="input" id="t_zone" list="t_zones" value="${esc(t.bidding_zone)}"><datalist id="t_zones"><option value="DE-LU"><option value="AT"><option value="CH"><option value="NL"><option value="BE"><option value="FR"></datalist><span class="hint">Deutschland: DE-LU</span></div>
             <div class="field"><label>Aufschlag netto (ct/kWh)</label><input class="input" id="t_markup" type="number" step="0.01" min="0" value="${t.markup_ct}"><span class="hint">Summe aller festen Preisbestandteile ohne MwSt</span></div>
             <div class="field"><label>Mehrwertsteuer (%)</label><input class="input" id="t_vat" type="number" step="0.1" min="0" value="${t.vat}"></div>
-            <div class="field"><label>Einspeisevergütung (ct/kWh)</label><input class="input" id="t_feed" type="number" step="0.01" min="0" value="${t.feed_in_ct}"><span class="hint">${ownFeed.length ? 'Für alle Anlagen ohne eigene Vergütung' : 'Für Planung und Kostenübersicht – eine eigene Vergütung je Anlage stellst du bei der Anlage ein'}</span></div>
-            ${ownFeed.length ? `<div class="field span-2"><label>Einspeisung aufteilen</label><div class="seg" id="t_split">${[['kwp', 'nach Anlagenleistung (kWp)'], ['production', 'nach gemessener Erzeugung']].map(([v, l]) => `<button type="button" data-v="${v}" class="${(t.feed_in_split || 'kwp') === v ? 'active' : ''}">${l}</button>`).join('')}</div><span class="hint">Eigene Vergütung: ${ownFeed.map((a) => `${esc(a.name)} ${nf(a.feed_in_ct, 2)} ct`).join(' · ')}. Für die eingespeiste Energie gibt es nur einen Zähler – meist teilt der Netzbetreiber sie nach Anlagenleistung auf.</span></div>` : ''}
+            <div class="field ${feedUnused ? 'unused' : ''}"><label>Einspeisevergütung (ct/kWh)${feedUnused ? ' <span class="badge">nicht verwendet</span>' : ''}</label><input class="input" id="t_feed" type="number" step="0.01" min="0" value="${t.feed_in_ct}"><span class="hint">${feedUnused
+              ? 'Alle PV-Anlagen haben eine eigene Vergütung (Einstellungen › PV-Anlagen) – dieser Wert wird deshalb nicht verwendet.'
+              : ownFeed.length ? `Gilt für: ${tariffFeed.map((a) => esc(a.name)).join(', ')} – ${ownFeed.map((a) => esc(a.name)).join(', ')} ${ownFeed.length > 1 ? 'haben' : 'hat'} eine eigene Vergütung`
+                : 'Für Planung und Kostenübersicht – eine eigene Vergütung je Anlage stellst du bei der Anlage ein'}</span></div>
+            ${ownFeed.length ? `<div class="field span-2"><label>Einspeisung aufteilen</label><div class="seg" id="t_split">${[['kwp', 'nach Anlagenleistung (kWp)'], ['production', 'nach gemessener Erzeugung']].map(([v, l]) => `<button type="button" data-v="${v}" class="${(t.feed_in_split || 'kwp') === v ? 'active' : ''}">${l}</button>`).join('')}</div>
+              <div class="feed-rates">${pvArrays.map((a) => `<span>${esc(a.name)} <b>${nf(a.feed_in_ct ?? t.feed_in_ct, 2)} ct</b> <span class="faint">· ${nf(a.kwp, 2)} kWp${a.feed_in_ct == null ? ' · Wert oben' : ''}</span></span>`).join('')}</div>
+              <ul class="hint feed-explain">
+                <li><b>Nach Anlagenleistung (kWp):</b> Die eingespeiste Energie wird im Verhältnis der installierten Leistung auf die Anlagen verteilt – so rechnen die meisten Netzbetreiber, wenn mehrere Anlagen einen gemeinsamen Einspeisezähler haben. Mit deinen Anlagen ergibt das <b>${nf(pvArrays.reduce((x, a) => x + a.kwp * (a.feed_in_ct ?? t.feed_in_ct), 0) / pvArrays.reduce((x, a) => x + a.kwp, 0), 2)} ct/kWh</b>.</li>
+                <li><b>Nach gemessener Erzeugung:</b> In jeder Stunde bekommt jede Anlage den Anteil, den sie in dieser Stunde erzeugt hat. Nachts oder ohne Messwerte wird nach kWp aufgeteilt. Nur wählen, wenn dein Netzbetreiber so abrechnet (z. B. mit eigenen Erzeugungszählern).</li>
+              </ul></div>` : ''}
             <div class="field"><label>Grundgebühr (€/Monat)</label><input class="input" id="t_fee" type="number" step="0.01" min="0" value="${t.base_fee_eur ?? 0}"><span class="hint">Nur für die Kostenübersicht</span></div>
           </div>
           <div class="field" style="margin-top:4px"><label>Vergleichen mit</label>

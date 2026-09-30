@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.3
+
+- Einstellungen › Strompreis: Erklärung der beiden Arten, die Einspeisung aufzuteilen, mit dem Ergebnis für die eigenen Anlagen; Übersicht der Vergütung je Anlage
+- Einstellungen › Strompreis: Haben alle Anlagen eine eigene Vergütung, ist die allgemeine Einspeisevergütung als „nicht verwendet“ markiert; sonst steht dabei, für welche Anlagen sie gilt
+
 ## 0.6.2
 
 - PV-Anlagen: optional eine eigene Einspeisevergütung je Anlage. Da es nur einen Zähler für die Einspeisung gibt, wird sie aufgeteilt – nach Anlagenleistung (kWp, Standard) oder nach der gemessenen Erzeugung jeder Anlage (Einstellungen › Strompreis › „Einspeisung aufteilen“)
