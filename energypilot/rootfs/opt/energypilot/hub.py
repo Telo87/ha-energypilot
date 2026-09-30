@@ -722,6 +722,8 @@ class Hub:
                 rows += [(learn.LOAD_SOURCE, learn.BASE_SERIES, t, horizon, round(v, 1), 0) for t, v in model_out.items()]
                 rows += [(learn.NAIVE_SOURCE, learn.BASE_SERIES, t, horizon, round(v, 1), 0) for t, v in naive.items()]
         self.db.put_forecast(rows)
+        # up to 0.5.5 the live correction was also copied onto the load forecast
+        self.db.delete_forecast_source(learn.NOWCAST_SOURCE, learn.BASE_SERIES)
         self.model_info = info
         self._acc_cache.clear()
         if rows:
@@ -1123,9 +1125,11 @@ class Hub:
         hour = now // 3600 * 3600
         f = (self.nowcast or {}).get("factor") or 1.0
         base = (self.nowcast or {}).get("source") or learn.PV_SOURCE
+        # PV arrays only: the own load forecast has the same source key ("ep") on the series "base"
+        ids = {c["id"] for c in self.settings.arrays if c["kwp"] > 0}
         rows = []
         for source, arr, t, wh in self.db.forecasts(hour + 3600, hour + 3600 * len(learn.NOWCAST_WEIGHTS), "d0"):
-            if source == base:
+            if source == base and arr in ids:
                 w = learn.NOWCAST_WEIGHTS[(t - hour) // 3600]
                 rows.append((learn.NOWCAST_SOURCE, arr, t, "d0", round(wh * (1 + (f - 1) * w), 1), now))
         self.db.put_forecast(rows)

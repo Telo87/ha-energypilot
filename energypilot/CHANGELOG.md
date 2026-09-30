@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.6
+
+- Behoben: Die Live-Korrektur der PV-Prognose wurde auch auf die Verbrauchsprognose kopiert (beide tragen intern dasselbe Kürzel) und erschien deshalb beim Grundverbrauch in Tagesverlauf und Prognose-Check. Der Plan war nicht betroffen. Die falschen Werte werden beim Update gelöscht
+- Tagesverlauf: Die Tagessumme heißt je nach Auswahl „Tagessumme Erzeugung“ oder „Tagessumme Verbrauch“
+
 ## 0.5.5
 
 Durchsicht des ganzen Add-ons auf Fehler:

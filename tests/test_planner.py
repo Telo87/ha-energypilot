@@ -264,3 +264,14 @@ def test_market_average_only_past_quarter_hours(tmp_path):
     hub.db.put_prices([(hour + 7200 + q * 900, 900, 900.0) for q in range(8)])  # known future: 90 ct net
     res = hub.costs(hour, hour + 5 * 3600)
     assert res["totals"]["avg_market_ct"] == res["totals"]["avg_paid_ct"]
+
+
+def test_nowcast_leaves_the_load_forecast_alone(tmp_path):
+    hub = _hub_with_array(tmp_path)
+    aid = hub.settings.arrays[0]["id"]
+    hour = int(time.time()) // 3600 * 3600
+    hub.db.put_forecast([("ep", s, hour + 3600, "d0", 800.0, 0) for s in (aid, "base")])
+    hub.nowcast = {"factor": 1.5, "source": "ep"}
+    hub.write_nowcast()
+    rows = {(src, arr) for src, arr, _t, _wh in hub.db.forecasts(hour, hour + 7200, "d0")}
+    assert ("nc", aid) in rows and ("nc", "base") not in rows
