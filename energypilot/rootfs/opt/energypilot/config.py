@@ -46,16 +46,19 @@ class Options:
 
 def load_options() -> Options:
     opts = Options()
+    raw: dict = {}
     try:
         raw = json.loads(OPTIONS_FILE.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return opts
+        pass
     except (OSError, ValueError) as err:
         _LOGGER.warning("Could not read %s: %s", OPTIONS_FILE, err)
-        return opts
     for key in ("publish_sensors", "log_level"):
         if raw.get(key) is not None:
             setattr(opts, key, raw[key])
+    # local development against a real Home Assistant must never overwrite the add-on's sensors
+    if os.environ.get("ENERGYPILOT_PUBLISH") == "0":
+        opts.publish_sensors = False
     return opts
 
 

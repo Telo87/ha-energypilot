@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.4
+
+- Übersicht neu geordnet: oben die Karte **„Jetzt“** mit Empfehlung, Begründung und „Strom kaufen: ja/nein“ sowie den Energieflüssen (PV, Haus, Akku, Netz); darunter Strompreis, PV heute und Grundverbrauch
+- Diagramm-Legenden zeigen nur die eingeblendeten Linien, weitere Quellen hinter „+N weitere“
+- Besser lesbar: Hilfstexte mit höherem Kontrast (WCAG AA), größere Bedienflächen auf Touch-Geräten
+- Planung: Kachel „Akku leer (Prognose)“ statt der mehrdeutigen Angabe „reicht“
+- Entwicklung: `dev.py` startet EnergyPilot lokal gegen ein echtes Home Assistant – nur lesend, schreibt keine Sensoren
+
 ## 0.3.3
 
 - Neu: **Protokoll** – jede Stunde wird die Empfehlung festgehalten (Modus, Preis, PV- und Verbrauchsprognose, geplanter Ladezustand, gemessener Ladezustand). Sobald die Messwerte da sind, rechnet EnergyPilot für jeden Tag drei Stromrechnungen aus den echten Werten: **ohne Plan** (Akku im Eigenverbrauch), **mit Plan** (Empfehlungen befolgt) und **optimal** (im Nachhinein bestmöglich)

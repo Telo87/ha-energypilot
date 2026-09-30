@@ -334,7 +334,12 @@
 
   // legend chips toggle lines; hidden sources are remembered per browser
   function legendHTML(bar, lines, hidden) {
-    return `<div class="legend">${bar ? `<span class="static"><i class="box" style="background:${bar.color}"></i>${esc(bar.label)}</span>` : ''}${lines.map((l) => `<button data-series="${esc(l.key)}" class="${hidden.has(l.key) ? 'off' : ''}" aria-pressed="${!hidden.has(l.key)}"><i style="background:${l.color}"></i>${esc(l.label)}</button>`).join('')}</div>`;
+    const all = store.get('legendAll', false);
+    const shown = all ? lines : lines.filter((l) => !hidden.has(l.key));
+    const more = lines.length - shown.length;
+    const toggle = more ? `<button class="more" data-legend-more>+${more} weitere</button>`
+      : all && lines.some((l) => hidden.has(l.key)) ? '<button class="more" data-legend-more>weniger</button>' : '';
+    return `<div class="legend">${bar ? `<span class="static"><i class="box" style="background:${bar.color}"></i>${esc(bar.label)}</span>` : ''}${shown.map((l) => `<button data-series="${esc(l.key)}" class="${hidden.has(l.key) ? 'off' : ''}" aria-pressed="${!hidden.has(l.key)}"><i style="background:${l.color}"></i>${esc(l.label)}</button>`).join('')}${toggle}</div>`;
   }
   function hiddenSet(ranking, all) {
     const stored = store.get('hidden', null);
@@ -473,14 +478,27 @@
       const kpi = (key, icon, cls, label, value, unit, foot) => `<div class="card kpi" data-key="${key}"><div class="kpi-label"><span class="kpi-icon ${cls}">${ic(icon)}</span>${label}</div><div class="kpi-value">${value}${unit ? `<small>${unit}</small>` : ''}</div><div class="kpi-foot">${foot}</div></div>`;
       const w = (k, v) => (v == null ? '–' : cnt(k, nf(Math.abs(v) >= 1000 ? v / 1000 : v, Math.abs(v) >= 1000 ? 2 : 0)));
       const wu = (v) => (v == null ? '' : Math.abs(v) >= 1000 ? 'kW' : 'W');
+      // "Jetzt": what to do + where the power flows – the most important information first
+      const flowNode = (icon, cls, label, value, sub) => `<div class="flow-node"><div class="fn-head"><span class="kpi-icon ${cls}">${ic(icon)}</span>${label}</div><div class="fn-value">${value}</div><div class="fn-sub">${sub}</div></div>`;
+      const wv = (k, v) => `${w(k, v)}${v == null ? '' : `<small>${wu(v)}</small>`}`;
+      const m = plan && plan.ok ? MODE[plan.decision] : null;
+      const decision = m ? `<div class="now-decision m-${plan.decision}">
+          <div class="now-kicker">Empfehlung jetzt</div>
+          <div class="now-title"><span class="avatar ${m[2]}">${ic(m[1])}</span>${esc(plan.label)}</div>
+          <p class="muted">${esc(plan.text)}</p>
+          <div class="row wrap" style="gap:8px"><span class="badge ${plan.buy_now ? 'accent' : ''}">Strom kaufen: ${plan.buy_now ? 'ja' : 'nein'}</span><a class="btn sm" href="#/plan">${ic('battery')}Zur Planung</a></div></div>`
+        : `<div class="now-decision"><div class="now-kicker">Empfehlung jetzt</div><div class="now-title">Noch kein Plan</div><p class="muted">${esc((plan && plan.reason) || 'Wird berechnet …')}</p></div>`;
+      const flows = [
+        flowNode('solar', 'warn', 'PV-Erzeugung', wv('pv', pvNow), pvVals.length ? ov.arrays.map((a) => `${esc(a.name)} ${fmtW(val(`pv:${a.id}`))}`).join(' · ') : missing()),
+        flowNode('home', '', 'Hausverbrauch', wv('house', val('house')), lv.house ? (ov.load ? `Grundverbrauch heute ~${nf(ov.load.today, 1)} kWh` : 'aktuell') : missing()),
+        flowNode('battery', 'ok', 'Akku', soc == null ? '–' : `${cnt('soc', nf(soc, 0))}<small>%</small>`, `${bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'}${rt ? ` · ${rt.empty_at ? `reicht bis ${fmtWhen(rt.empty_at)}` : 'reicht bis morgen Abend'}` : ''}`),
+        flowNode('plug', grid != null && grid < 0 ? 'ok' : '', grid != null && grid < 0 ? 'Einspeisung' : 'Netzbezug', wv('grid', grid == null ? null : Math.abs(grid)), lv.grid ? (grid > 20 ? 'Strom wird gekauft' : grid < -20 ? 'Überschuss geht ins Netz' : 'ausgeglichen') : missing()),
+      ].join('');
+      const nowCard = `<div class="card now-card"><div class="card-body now-grid">${decision}<div class="flow-grid">${flows}</div></div></div>`;
       const kpis = [
-        kpi('pv', 'solar', 'warn', 'PV-Leistung', w('pv', pvNow), wu(pvNow), pvVals.length ? ov.arrays.map((a) => `${esc(a.name)} ${fmtW(val(`pv:${a.id}`))}`).join(' · ') : missing()),
-        kpi('house', 'home', '', 'Hausverbrauch', w('house', val('house')), wu(val('house')), lv.house ? (ov.load ? `Grundverbrauch heute ~${nf(ov.load.today, 1)} kWh · morgen ~${nf(ov.load.tomorrow, 1)} kWh` : 'aktuell') : missing()),
-        kpi('grid', 'plug', grid != null && grid < 0 ? 'ok' : '', grid != null && grid < 0 ? 'Einspeisung' : 'Netzbezug', w('grid', grid == null ? null : Math.abs(grid)), wu(grid), lv.grid ? (grid > 0 ? 'Strom wird gekauft' : grid < 0 ? 'Überschuss geht ins Netz' : 'ausgeglichen') : missing()),
-        kpi('batt', 'battery', 'ok', 'Batterie', soc == null ? '–' : cnt('soc', nf(soc, 0)), soc == null ? '' : '%', `${bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'}${rt ? ` · ${rt.empty_at ? `reicht bis ${fmtWhen(rt.empty_at)}` : 'reicht bis morgen Abend'}` : ''}`),
-        plan && plan.ok ? kpi('plan', MODE[plan.decision][1], MODE[plan.decision][2], 'Empfehlung jetzt', esc(plan.label), '', plan.buy_now ? 'Strom kaufen lohnt sich jetzt' : 'Kein Netzladen nötig') : '',
         kpi('price', 'euro', pr && avg != null && pr.price <= avg ? 'ok' : 'warn', 'Strompreis jetzt', pr ? cnt('price', nf(pr.price, 1)) : '–', pr ? 'ct/kWh' : '', pr ? `Börse ${nf(pr.spot, 1)} ct · Ø heute ${nf(avg, 1)} ct` : 'noch keine Preise'),
-        kpi('today', 'sun', 'up', 'PV heute', cnt('prod', nf(ov.produced_kwh, 1)), 'kWh', best ? `Prognose ${nf(best.today, 1)} kWh (${esc(best.label)}) · morgen ${nf(best.tomorrow, 1)}` : 'noch keine Prognose'),
+        kpi('today', 'sun', 'up', 'PV heute', cnt('prod', nf(ov.produced_kwh, 1)), 'kWh', best ? `Prognose ${nf(best.today, 1)} kWh · morgen ${nf(best.tomorrow, 1)} kWh` : 'noch keine Prognose'),
+        ov.load ? kpi('load', 'home', '', 'Grundverbrauch heute', `~${cnt('lt', nf(ov.load.today, 1))}`, 'kWh', `Prognose ohne E-Auto und Heizstab · morgen ~${nf(ov.load.tomorrow, 1)} kWh`) : '',
       ].join('');
 
       const ranking = ov.ranking || [];
@@ -492,7 +510,7 @@
       const statusRows = Object.entries(ov.status).filter(([k]) => !k.startsWith('act:') || !ov.status[k].ok).map(([k, s]) => `<div class="list-item"><span class="dot ${s.ok ? 'ok' : 'err'}"></span><div class="grow"><div class="title">${esc(k === 'price' ? 'Börsenstrompreis' : k === 'actual' ? 'Messwerte aus Home Assistant' : k === 'ha' ? 'Home Assistant' : s.label)}</div><div class="meta ${s.ok ? '' : 'err'}">${s.ok ? `abgerufen ${fmtAgo(s.at)}` : esc(s.text)}</div></div></div>`).join('');
       const acc = (ov.accuracy || []).slice(0, 5);
       const bf = ov.backfill;
-      el.innerHTML = `<div class="grid kpis">${kpis}</div>
+      el.innerHTML = `${nowCard}<div class="grid kpis">${kpis}</div>
         <div class="grid dash">
           <div class="card"><div class="card-head"><h2>PV-Erzeugung &amp; Verbrauch – heute und morgen <span class="sub">stündlich · Prognose kurzfristig</span></h2></div>
             <div class="card-body">${legendHTML({ ...MEASURED, label: 'Gemessen', color: 'var(--measured)' }, lines, hidden)}<div class="chart tall" id="pvChart"></div></div></div>
@@ -572,7 +590,7 @@
         <div class="grid kpis">
           ${kpi('battery', 'ok', 'Akku jetzt', `${cnt('psoc', nf(p.soc, 0))}<small>%</small>`, `${nf(rt.usable_kwh, 1)} kWh nutzbar bis zur Reserve von ${nf(p.battery.min_soc, 0)} %`)}
           ${kpi('clock', 'warn', 'Reichweite', rt.now_hours != null ? esc(fmtDur(rt.now_hours)) : '–', house ? `beim aktuellen Verbrauch von ${fmtW(house)}` : 'Hausverbrauch-Sensor fehlt')}
-          ${kpi('sun', 'up', 'Laut Prognose', rt.empty_at ? `leer ${esc(fmtWhen(rt.empty_at))}` : 'reicht', rt.empty_at ? (rt.full_at && rt.full_at > rt.empty_at ? `wieder voll ${fmtWhen(rt.full_at)}` : 'mit PV-Erzeugung und Verbrauchsprognose') : rt.full_at ? `voll ${fmtWhen(rt.full_at)} · reicht bis ${fmtWhen(rt.until, true)}` : `bis ${fmtWhen(rt.until, true)}`)}
+          ${kpi('sun', 'up', 'Akku leer (Prognose)', `<span class="kpi-text">${rt.empty_at ? esc(fmtWhen(rt.empty_at)) : `nicht vor ${esc(fmtWhen(rt.until, true))}`}</span>`, rt.empty_at ? (rt.full_at && rt.full_at > rt.empty_at ? `wieder voll ${fmtWhen(rt.full_at)}` : 'mit PV-Erzeugung und Verbrauchsprognose') : rt.full_at ? `voll ${fmtWhen(rt.full_at)} · reicht bis ${fmtWhen(rt.until, true)}` : `bis ${fmtWhen(rt.until, true)}`)}
           ${kpi('home', '', 'Verbrauch (Prognose)', `${nf(loadSum(0, tomorrowTs), 1)}<small>kWh</small>`, `bis Mitternacht · morgen ${nf(loadSum(tomorrowTs, afterTs), 1)} kWh · ohne E-Auto/Heizstab`)}
           ${p.ok ? kpi('euro', p.savings_eur > 0.005 ? 'ok' : '', 'Ersparnis durch Plan', `${cnt('sav', nf(Math.max(0, p.savings_eur), 2))}<small>€</small>`, `Stromkosten ${nf(p.cost_eur, 2)} € statt ${nf(p.baseline_eur, 2)} € bis ${fmtWhen(p.horizon_end, true)}`) : ''}
         </div>
@@ -1374,6 +1392,11 @@
     $('#scrim').addEventListener('click', () => $('#app').classList.remove('nav-open'));
     window.addEventListener('scroll', () => $('.topbar').classList.toggle('scrolled', window.scrollY > 4), { passive: true });
     window.addEventListener('hashchange', navigate);
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('[data-legend-more]')) return;
+      store.set('legendAll', !store.get('legendAll', false));
+      navigate();
+    });
     navigate();
   }
   boot();

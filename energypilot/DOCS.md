@@ -181,5 +181,7 @@ cd energypilot/rootfs/opt
 ENERGYPILOT_DEMO=1 ENERGYPILOT_ALLOW_ALL=1 ENERGYPILOT_DATA=../../../data/demo python -m energypilot
 ```
 
-Gegen ein echtes Home Assistant zusätzlich `ENERGYPILOT_HA_URL=http://homeassistant.local:8123`
-und `ENERGYPILOT_HA_TOKEN=<langlebiges Zugriffstoken>` setzen und `ENERGYPILOT_DEMO` weglassen.
+Lokal gegen ein echtes Home Assistant (nur lesend – schreibt keine Sensoren, eigene Daten in
+`data/dev`): `.env.example` nach `.env` kopieren, Adresse und ein langlebiges Zugriffstoken eintragen
+(Profil › Sicherheit), dann `python dev.py` starten und http://localhost:8099 öffnen. `.env` ist von Git
+ausgeschlossen.

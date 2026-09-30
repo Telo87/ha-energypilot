@@ -8,7 +8,7 @@
   --border-strong: #cbd5e1;
   --text: #0f172a;
   --text-2: #475569;
-  --text-3: #8392a8;
+  --text-3: #64748b;
   --accent: #2563eb;
   --accent-2: #1d4ed8;
   --accent-soft: rgba(37, 99, 235, .1);
@@ -42,7 +42,7 @@
     --border-strong: #334463;
     --text: #e7ecf6;
     --text-2: #a7b3c9;
-    --text-3: #6d7c98;
+    --text-3: #8b99b4;
     --accent: #5b8cff;
     --accent-2: #7aa2ff;
     --accent-soft: rgba(91, 140, 255, .14);
@@ -70,7 +70,7 @@
   --border-strong: #334463;
   --text: #e7ecf6;
   --text-2: #a7b3c9;
-  --text-3: #6d7c98;
+  --text-3: #8b99b4;
   --accent: #5b8cff;
   --accent-2: #7aa2ff;
   --accent-soft: rgba(91, 140, 255, .14);
@@ -629,3 +629,30 @@ svg.i.flip { transform: scaleX(-1); }
 /* dashed lines fade in instead of drawing themselves (the draw animation uses the dash pattern) */
 .chart svg .ln.dash { stroke-dasharray: 5 4; }
 .chart svg.draw-in .ln.dash { stroke-dasharray: 5 4; animation: fade .9s ease both; }
+
+/* "Jetzt" card on the overview */
+.now-card { margin-bottom: 16px; }
+.now-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 22px; align-items: start; }
+@media (max-width: 1000px) { .now-grid { grid-template-columns: 1fr; } }
+.now-decision { border-left: 4px solid var(--ok); padding: 2px 0 2px 16px; }
+.now-decision.m-hold { border-left-color: var(--warn); }
+.now-decision.m-charge { border-left-color: var(--accent); }
+.now-decision p { margin: 0 0 12px; font-size: 13.5px; }
+.now-kicker { font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); }
+.now-title { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 700; letter-spacing: -.01em; margin: 8px 0 8px; }
+.flow-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.flow-node { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; min-width: 0; }
+.fn-head { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); font-weight: 500; }
+.fn-head .kpi-icon { width: 24px; height: 24px; border-radius: 7px; }
+.fn-head .kpi-icon svg { width: 14px; height: 14px; }
+.fn-value { font-size: 21px; font-weight: 700; letter-spacing: -.02em; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+.fn-value small { font-size: 12.5px; font-weight: 500; color: var(--text-2); margin-left: 3px; }
+.fn-sub { font-size: 12px; color: var(--text-3); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.kpi-text { font-size: 18px; letter-spacing: -.01em; }
+.legend button.more { border-style: dashed; color: var(--text-2); }
+/* touch screens: larger hit areas */
+@media (pointer: coarse) {
+  .legend button { min-height: 36px; padding: 6px 12px; }
+  .icon-btn { min-width: 40px; min-height: 40px; }
+  .seg button { min-height: 36px; }
+}
