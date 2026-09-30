@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.4
+
+- Einstellungen › Strompreis: Der Vergleich mit einem anderen Tarif lässt sich ein- und ausschalten. Ausgeschaltet verschwinden Vergleichs-Kennzahl, Linie, Spalten und die Freistrom-Karte von der Kosten-Seite; die eingetragenen Werte bleiben gespeichert
+
 ## 0.6.3
 
 - Einstellungen › Strompreis: Erklärung der beiden Arten, die Einspeisung aufzuteilen, mit dem Ergebnis für die eigenen Anlagen; Übersicht der Vergütung je Anlage

@@ -374,3 +374,14 @@ def test_feed_in_per_array_split_by_kwp_or_production(tmp_path):
     assert by_kwp == pytest.approx(0.09) and by_prod == pytest.approx(0.11)  # 1/4 * 8 + 3/4 * 12
     hub.settings.upsert_array({"id": b, "feed_in_ct": ""})  # back to the tariff's payment
     assert hub.settings.arrays[1]["feed_in_ct"] is None and hub.feed_in_avg() == 8.0
+
+
+def test_comparison_can_be_switched_off(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"sensors": {"grid": "sensor.grid"}, "tariff": {"compare_enabled": False, "compare_type": "flat"}})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    t = int(time.time()) // 3600 * 3600 - 7200
+    hub.db.put_actual([("grid", t, 1000.0)])
+    res = hub.costs(t, t + 3600)
+    assert res["totals"]["savings_eur"] is None and res["flat"] is None
+    assert res["tariff"]["compare_enabled"] is False

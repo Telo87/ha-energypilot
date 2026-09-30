@@ -82,6 +82,7 @@ DEFAULT_SETTINGS: dict = {
         "feed_in_split": "kwp",
         "base_fee_eur": 0.0,  # monthly base fee - only for the cost overview
         # tariff to compare the dynamic one with: "fixed" price or "flat" with free kWh per year
+        "compare_enabled": True,
         "compare_type": "fixed",
         "compare_price_ct": 32.0,  # fixed: gross price per kWh
         "compare_base_fee_eur": 12.0,  # fixed: per month
@@ -306,6 +307,8 @@ class Settings:
                         t[key] = _num(tariff[key], t[key], 0, hi)
                 if tariff.get("feed_in_split") in ("kwp", "production"):
                     t["feed_in_split"] = tariff["feed_in_split"]
+                if "compare_enabled" in tariff:
+                    t["compare_enabled"] = bool(tariff["compare_enabled"])
                 if tariff.get("compare_type") in ("fixed", "flat"):
                     t["compare_type"] = tariff["compare_type"]
                 if "flat_year_start" in tariff:

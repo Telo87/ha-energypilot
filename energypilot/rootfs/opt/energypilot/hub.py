@@ -548,7 +548,8 @@ class Hub:
             if t in acts.get("house", {}):
                 d["house_kwh"] += max(0.0, acts["house"][t] * house_sign) / 1000
         fee_day = float(tariff.get("base_fee_eur", 0)) * 12 / 365
-        flat = self.flat_usage(start, end) if tariff.get("compare_type") == "flat" else None
+        compare = tariff.get("compare_enabled", True)
+        flat = self.flat_usage(start, end) if compare and tariff.get("compare_type") == "flat" else None
         if flat:
             cmp_fee_day = float(tariff.get("flat_fee_eur", 0)) * 12 / 365
             cmp_feed = float(tariff.get("flat_feed_in_ct", 0))
@@ -590,7 +591,7 @@ class Hub:
         totals["days"] = len(out_days)
         totals["avg_paid_ct"] = round(tot["energy_ct"] / tot["priced_kwh"], 2) if tot["priced_kwh"] > 0.05 else None
         totals["avg_market_ct"] = round(tot["market_sum"] / tot["market_n"], 2) if tot["market_n"] else None
-        totals["savings_eur"] = round(tot["compare_total_eur"] - tot["total_eur"], 2)
+        totals["savings_eur"] = round(tot["compare_total_eur"] - tot["total_eur"], 2) if compare else None
         if tot["house_kwh"] > 0:
             totals["autarky_pct"] = round(max(0.0, 1 - tot["import_kwh"] / tot["house_kwh"]) * 100, 1)
         if tot["pv_kwh"] > 0:
@@ -601,7 +602,7 @@ class Hub:
             "split": bool(sensors.get("grid_import") and sensors.get("grid_export")),
             "has_grid": bool(sensors.get("grid") or sensors.get("grid_import")),
             "tariff": {k: tariff.get(k) for k in (
-                "base_fee_eur", "compare_type", "compare_price_ct", "compare_base_fee_eur", "feed_in_ct",
+                "base_fee_eur", "compare_enabled", "compare_type", "compare_price_ct", "compare_base_fee_eur", "feed_in_ct",
                 "flat_fee_eur", "flat_free_kwh", "flat_price_ct", "flat_feed_in_ct", "flat_year_start")},
             "flat": {k: v for k, v in flat.items() if k != "excess"} if flat else None,
             "feed_in": {"avg_ct": round(self.feed_in_avg(), 2),
