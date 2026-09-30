@@ -90,6 +90,8 @@ DEFAULT_SETTINGS: dict = {
     # flip the sign of a sensor – EnergyPilot expects: house consumption positive,
     # grid positive = import, battery positive = charging
     "invert": {"house": False, "grid": False, "battery_power": False},
+    # heating rod with its own control that only uses PV surplus (never battery or grid)
+    "devices": {"heater_surplus": True},
     "backfill_days": 90,
     # home battery for the planner
     "battery": {
@@ -307,6 +309,9 @@ class Settings:
                         b[key] = _num(bat[key], b[key], lo, hi)
                 if "grid_charge" in bat:
                     b["grid_charge"] = bool(bat["grid_charge"])
+            dev = values.get("devices")
+            if isinstance(dev, dict) and "heater_surplus" in dev:
+                self.data["devices"]["heater_surplus"] = bool(dev["heater_surplus"])
             if "backfill_days" in values:
                 self.data["backfill_days"] = int(_num(values["backfill_days"], 90, 0, 730))
             self._save()

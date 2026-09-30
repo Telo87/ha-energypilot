@@ -174,8 +174,10 @@ rechnet es für jeden Tag drei Stromrechnungen aus den **echten** Werten:
 
 „Mit EnergyPilot gespart“ kann auch negativ sein, wenn Prognosen danebenlagen. Liegt der Wert über einige Tage
 nahe an „optimal“ (Anteil „davon erreicht“ hoch), sind Prognosen und Planung verlässlich genug, um
-EnergyPilot die Steuerung zu überlassen. Grundlage ist der Grundverbrauch; E-Auto und Heizstab sind nicht
-enthalten.
+EnergyPilot die Steuerung zu überlassen. Gerechnet wird mit dem gesamten gemessenen Hausverbrauch
+einschließlich E-Auto. Ein Heizstab, der nur mit PV-Überschuss läuft (Einstellung beim Heizstab-Sensor),
+nimmt in der Nachrechnung nur auf, was sonst eingespeist würde. Zur Kontrolle steht daneben die gemessene
+Rechnung aus Netzbezug und Einspeisung.
 
 ## Prognose-Check
 

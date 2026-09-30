@@ -465,6 +465,23 @@ class Hub:
         self.mark("actual", True, count=total)
 
     # ------------------------------------------------------------------- costs
+    def _house_sign(self, acts: dict[str, dict[int, float]]) -> float:
+        """Like the base load: a house sensor with negative consumption is flipped automatically."""
+        return -1.0 if self.settings.data["invert"].get("house") or sum(acts.get("house", {}).values()) < 0 else 1.0
+
+    def _grid_kwh(self, acts: dict[str, dict[int, float]], t: int) -> tuple[float, float] | None:
+        """Measured (import, export) in kWh of one hour - separate sensors first, else the signed grid power."""
+        sensors, inv = self.settings.data["sensors"], self.settings.data["invert"]
+        imp = abs(acts["grid_in"][t]) / 1000 if sensors.get("grid_import") and t in acts.get("grid_in", {}) else None
+        exp = abs(acts["grid_out"][t]) / 1000 if sensors.get("grid_export") and t in acts.get("grid_out", {}) else None
+        if (imp is None or exp is None) and t in acts.get("grid", {}):
+            v = acts["grid"][t] * (-1.0 if inv.get("grid") else 1.0) / 1000
+            imp = max(0.0, v) if imp is None else imp
+            exp = max(0.0, -v) if exp is None else exp
+        if imp is None and exp is None:
+            return None
+        return imp or 0.0, exp or 0.0
+
     def costs(self, start: int, end: int) -> dict:
         """Electricity bill from the measured grid energy and the hourly prices, per local day."""
         s = self.settings.data
@@ -480,20 +497,13 @@ class Hub:
             price_h[slot["ts"] // 3600 * 3600].append(slot["price"])
             if slot["ts"] + slot["dur"] <= now:  # only what could have been bought already
                 market[self.day_key(slot["ts"])].append(slot["price"])
-        grid_sign = -1.0 if inv.get("grid") else 1.0
-        # like the base load: a house sensor with negative consumption is flipped automatically
-        house_sign = -1.0 if inv.get("house") or sum(acts.get("house", {}).values()) < 0 else 1.0
+        house_sign = self._house_sign(acts)
         days: dict[str, dict] = {}
         for t in range(start, end, 3600):
-            imp = abs(acts["grid_in"][t]) / 1000 if sensors.get("grid_import") and t in acts.get("grid_in", {}) else None
-            exp = abs(acts["grid_out"][t]) / 1000 if sensors.get("grid_export") and t in acts.get("grid_out", {}) else None
-            if (imp is None or exp is None) and t in acts.get("grid", {}):
-                v = acts["grid"][t] * grid_sign / 1000
-                imp = max(0.0, v) if imp is None else imp
-                exp = max(0.0, -v) if exp is None else exp
-            if imp is None and exp is None:
+            g = self._grid_kwh(acts, t)
+            if g is None:
                 continue
-            imp, exp = imp or 0.0, exp or 0.0
+            imp, exp = g
             d = days.setdefault(self.day_key(t), {
                 "import_kwh": 0.0, "export_kwh": 0.0, "energy_ct": 0.0, "unpriced_kwh": 0.0,
                 "pv_kwh": 0.0, "house_kwh": 0.0, "hours": 0,
@@ -914,23 +924,44 @@ class Hub:
     def journal(self, days: int = 14) -> dict:
         """Recommendations of the past days checked against what really happened.
 
-        Three bills from the real PV production, base load and prices:
-        without plan (battery on its own – what actually happened), with the
-        recommendations followed, and the best possible plan in hindsight."""
+        Three bills are simulated from the measured PV production, the measured
+        total house consumption (including EV and heating rod) and the prices:
+        without plan (battery on its own), with the recommendations followed and
+        the best possible plan in hindsight. The real bill from the measured grid
+        import and export is shown next to them as a cross-check."""
         now = int(time.time())
         end = now // 3600 * 3600  # complete hours only
         start = self.midnight(now) - (days - 1) * 86400
         logs = {r[0]: r for r in self.db.plan_log(start, end)}
         ids = [c["id"] for c in self.settings.arrays if c["kwp"] > 0 and c.get("sensor")]
+        sensors = self.settings.data["sensors"]
+        acts: dict[str, dict[int, float]] = defaultdict(dict)
+        for series, t, wh in self.db.actuals(start, end):
+            acts[series][t] = wh
         pv: dict[int, float] = defaultdict(float)
         pv_n: dict[int, int] = defaultdict(int)
-        load: dict[int, float] = {}
-        for series, t, wh in self.db.actuals(start, end):
-            if series in ids:
+        for i in ids:
+            for t, wh in acts.get(i, {}).items():
                 pv[t] += max(0.0, wh)
                 pv_n[t] += 1
-            elif series == learn.BASE_SERIES:
-                load[t] = wh
+        base_load = acts.get(learn.BASE_SERIES, {})
+        extra: dict[str, dict[int, float]] = {}
+        for key in ("ev", "heater"):
+            if sensors.get(key) and acts.get(key):
+                sgn = -1.0 if sum(acts[key].values()) < 0 else 1.0
+                extra[key] = {t: max(0.0, v * sgn) for t, v in acts[key].items()}
+        # a heating rod with its own surplus control never draws from battery or grid: it only takes
+        # what would otherwise be fed in - so it is not part of the load the battery covers
+        heater = extra.get("heater", {}) if self.settings.data["devices"].get("heater_surplus", True) else {}
+        # the simulation runs on everything the house used - the battery also feeds the EV
+        if sensors.get("house") and acts.get("house"):
+            sign = self._house_sign(acts)
+            house = {t: max(0.0, v * sign) for t, v in acts["house"].items()}
+            sim_load = {t: max(0.0, v - heater.get(t, 0.0)) for t, v in house.items()}
+            load_kind = "house"
+        else:
+            house = sim_load = {t: max(0.0, v) for t, v in base_load.items()}
+            load_kind = "base"
         price_h: dict[int, list[float]] = defaultdict(list)
         for slot in self.price_slots(start, end):
             price_h[slot["ts"] // 3600 * 3600].append(slot["price"])
@@ -948,26 +979,60 @@ class Hub:
         b = self.battery()
         feed_in = float(self.settings.data["tariff"].get("feed_in_ct", 0))
         cap = b.capacity_kwh
+
+        def price(t: int) -> float:
+            return sum(price_h[t]) / len(price_h[t])
+
+        def bill(imp_by_hour: dict[int, float], exp_by_hour: dict[int, float]) -> dict:
+            """What was bought and fed in - without any credit for the energy left in the battery."""
+            imp_ct = sum(v * price(t) for t, v in imp_by_hour.items())
+            exp = sum(exp_by_hour.values())
+            return {"import_kwh": round(sum(imp_by_hour.values()), 2), "export_kwh": round(exp, 2),
+                    "import_eur": round(imp_ct / 100, 2), "export_eur": round(exp * feed_in / 100, 2),
+                    "total_eur": round((imp_ct - exp * feed_in) / 100, 2)}
+
+        def absorb(plan: planner.Plan) -> float:
+            """The surplus heating rod takes part of the simulated export (at most what it really used)."""
+            total = 0.0
+            if load_kind != "house":
+                return total
+            for st in plan.steps:
+                h = min(st.grid_export, heater.get(st.start, 0.0) / 1000)
+                if h > 0:
+                    st.grid_export -= h
+                    st.cost += h * feed_in  # no feed-in payment for what goes into the water
+                    plan.cost += h * feed_in
+                    total += h
+            return total
+
+        def sim_bill(plan: planner.Plan, heat: float) -> dict:
+            out = bill({st.start: st.grid_import for st in plan.steps}, {st.start: st.grid_export for st in plan.steps})
+            return {**out, "heater_kwh": round(heat, 2)}
+
         per_day: dict[str, list[int]] = defaultdict(list)
         for t in sorted(logs):
             per_day[self.day_key(t)].append(t)
         out_days = []
-        totals = {"base": 0.0, "plan": 0.0, "best": 0.0, "bill": 0.0, "hours": 0}
+        totals = {"base": 0.0, "plan": 0.0, "best": 0.0, "bill": 0.0, "real": 0.0, "real_hours": 0, "hours": 0}
         for day, ts_list in sorted(per_day.items(), reverse=True):
-            usable = [t for t in ts_list if pv_of(t) is not None and t in load and t in price_h]
+            usable = [t for t in ts_list if pv_of(t) is not None and t in sim_load and t in price_h]
             hours_detail = []
             for t in ts_list:
                 r = logs[t]
-                ok = t in usable
+                g = self._grid_kwh(acts, t)
                 hours_detail.append({
                     "ts": t, "mode": r[1], "price": r[2], "pv_fc": r[3], "load_fc": r[4],
                     "soc_plan": r[6],  # planned at the end of the hour
                     # measured at the end of the hour = start of the next logged hour
                     "soc_actual": logs[t + 3600][7] if t + 3600 in logs else None,
                     "pv": round(pv_of(t) / 1000, 3) if pv_of(t) is not None else None,
-                    "load": round(load[t] / 1000, 3) if t in load else None,
-                    "complete": ok,
+                    "load": round(base_load[t] / 1000, 3) if t in base_load else None,
+                    "house": round(house[t] / 1000, 3) if t in house else None,
+                    "grid_import": round(g[0], 3) if g else None,
+                    "grid_export": round(g[1], 3) if g else None,
+                    "complete": t in usable,
                 })
+            fc_hours = [t for t in usable if t in base_load]  # the load forecast is for the base load
             entry = {
                 "day": day, "hours": len(ts_list), "complete_hours": len(usable),
                 "charge_hours": sum(1 for t in ts_list if logs[t][1] == "charge"),
@@ -975,12 +1040,14 @@ class Hub:
                 # forecast and measurement over the same (complete) hours
                 "pv_fc": round(sum(logs[t][3] or 0 for t in usable), 2) if usable else None,
                 "pv": round(sum(pv_of(t) for t in usable) / 1000, 2) if usable else None,
-                "load_fc": round(sum(logs[t][4] or 0 for t in usable), 2) if usable else None,
-                "load": round(sum(load[t] for t in usable) / 1000, 2) if usable else None,
+                "load_fc": round(sum(logs[t][4] or 0 for t in fc_hours), 2) if fc_hours else None,
+                "load": round(sum(base_load[t] for t in fc_hours) / 1000, 2) if fc_hours else None,
+                "house": round(sum(house[t] for t in usable) / 1000, 2) if usable else None,
+                **{k: round(sum(v.get(t, 0.0) for t in usable) / 1000, 2) if usable else None for k, v in extra.items()},
                 "detail": hours_detail,
             }
             if usable:
-                hrs = [planner.Hour(t, pv_of(t) / 1000, max(0.0, load[t]) / 1000, sum(price_h[t]) / len(price_h[t])) for t in usable]
+                hrs = [planner.Hour(t, pv_of(t) / 1000, sim_load[t] / 1000, price(t)) for t in usable]
                 soc0 = cap * float(logs[usable[0]][7] or 0) / 100
                 ev = planner.end_price(hrs, b)
                 base = planner.simulate(hrs, soc0, b, feed_in, end_value=ev)
@@ -988,28 +1055,39 @@ class Hub:
                 targets = [cap * float(logs[t][6] or 0) / 100 for t in usable]
                 followed = planner.simulate(hrs, soc0, b, feed_in, modes, targets, end_value=ev)
                 best = planner.optimize(hrs, soc0, b, feed_in)
-                # shown bills: only what was bought and fed in. The savings also count
-                # the energy left in the battery at the end (all three at the same price)
-                bill = lambda plan: sum(st.cost for st in plan.steps)
+                bills = {k: sim_bill(pl, absorb(pl)) for k, pl in (("base", base), ("plan", followed), ("best", best))}
+                # the real bill over the same hours, from the measured grid energy
+                grid = {t: self._grid_kwh(acts, t) for t in usable}
+                if all(grid.values()):
+                    bills["real"] = bill({t: g[0] for t, g in grid.items()}, {t: g[1] for t, g in grid.items()})
+                    totals["real"] += bills["real"]["total_eur"]
+                    totals["real_hours"] += len(usable)
                 entry.update(
-                    cost_base=round(bill(base) / 100, 2), cost_plan=round(bill(followed) / 100, 2),
-                    cost_best=round(bill(best) / 100, 2),
+                    bills=bills,
+                    cost_real=bills["real"]["total_eur"] if "real" in bills else None,
+                    cost_base=bills["base"]["total_eur"], cost_plan=bills["plan"]["total_eur"], cost_best=bills["best"]["total_eur"],
+                    # the savings also count the energy left in the battery at the end (all three at the same price)
                     saved=round((base.cost - followed.cost) / 100, 2), possible=round((base.cost - best.cost) / 100, 2),
                 )
                 totals["base"] += base.cost
                 totals["plan"] += followed.cost
                 totals["best"] += best.cost
-                totals["bill"] += bill(base)
+                totals["bill"] += bills["base"]["total_eur"]
                 totals["hours"] += len(usable)
             out_days.append(entry)
         return {
             "days": out_days,
             "since": min(logs) if logs else None,
+            "load_kind": load_kind,
+            "heater_surplus": bool(heater),
+            "feed_in_ct": feed_in,
             "totals": {
                 "hours": totals["hours"],
                 "saved": round((totals["base"] - totals["plan"]) / 100, 2),
                 "possible": round((totals["base"] - totals["best"]) / 100, 2),
-                "cost_base": round(totals["bill"] / 100, 2),
+                "cost_base": round(totals["bill"], 2),
+                # only when every evaluated hour has grid values - otherwise not comparable
+                "cost_real": round(totals["real"], 2) if totals["hours"] and totals["real_hours"] == totals["hours"] else None,
             },
             "battery": self.settings.data["battery"],
         }

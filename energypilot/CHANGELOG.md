@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+- Protokoll: Die Nachrechnung nutzt jetzt den gesamten gemessenen Hausverbrauch einschließlich E-Auto, das auch aus dem Akku geladen wird. Bisher rechnete sie nur mit dem Grundverbrauch; lief z. B. der Heizstab mit PV-Überschuss, wurde dieser Strom fälschlich als Einspeisung gezählt
+- Neue Einstellung beim Heizstab: „läuft nur mit PV-Überschuss“ (Standard). Ein solcher Heizstab nimmt in der Nachrechnung nur auf, was sonst eingespeist würde – er leert nie den Akku und kauft keinen Netzstrom
+- Protokoll: Neu ist die gemessene Stromrechnung aus Netzbezug und Einspeisung – als Kennzahl oben, als Spalte „gemessen“ in der Tabelle und als Gegenprobe zur Nachrechnung
+- Einstellungen › Sensoren: Nach dem Speichern war der Speichern-Knopf wieder aktiv, obwohl nichts mehr zu speichern war
+- Protokoll, Tagesansicht: Stromrechnung für „gemessen“, „ohne EnergyPilot“, „mit EnergyPilot“ und „optimal“ aufgeteilt in Bezug (kWh, €) und Einspeisung (kWh, €); Verbrauch des Tages mit Anteil von Heizstab und E-Auto; je Stunde Gesamtverbrauch und gemessener Netzbezug bzw. Einspeisung
+
 ## 0.5.9
 
 - Planung: Ruht der Akku, steht statt „aus PV oder Netz“ konkret da, woher der Strom gerade kommt – z. B. „PV deckt den Verbrauch – 1,20 kW Überschuss gehen ins Netz“ oder „900 W aus PV, 600 W aus dem Netz“

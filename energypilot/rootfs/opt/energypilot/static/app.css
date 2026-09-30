@@ -713,3 +713,5 @@ a.notice.setup-hint:hover { filter: brightness(.97); }
 .seg.big button:not(.active):hover { background: var(--surface-3); color: var(--text); }
 .tb-label { font-size: 12px; font-weight: 600; color: var(--text-3); margin-right: -4px; }
 .tb-label:not(:first-child) { margin-left: 8px; }
+
+.table tr.strong td { background: var(--surface-2); }

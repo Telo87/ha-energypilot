@@ -697,18 +697,20 @@
         ${kpi('euro', t.saved >= 0 ? 'ok' : 'err', 'Mit EnergyPilot gespart', `${cnt('js', nf(t.saved, 2))}<small>€</small>`, 'wenn der Akku allen Empfehlungen gefolgt wäre')}
         ${kpi('trophy', 'up', 'Im Nachhinein möglich', `${cnt('jp', nf(t.possible, 2))}<small>€</small>`, 'mit perfektem Wissen über Sonne und Verbrauch')}
         ${kpi('target', share != null && share >= 60 ? 'ok' : 'warn', 'Davon erreicht', share == null ? '–' : `${cnt('jq', nf(share, 0))}<small>%</small>`, share == null ? 'bisher keine Ersparnis möglich' : 'Anteil der möglichen Ersparnis')}
-        ${kpi('home', '', 'Stromkosten ohne EnergyPilot', `${cnt('jc', nf(t.cost_base, 2))}<small>€</small>`, 'so wie der Akku tatsächlich lief; negativ = Einnahmen überwiegen')}
+        ${t.cost_real != null
+          ? kpi('home', '', 'Stromkosten gemessen', `${cnt('jc', nf(t.cost_real, 2))}<small>€</small>`, `aus Netzbezug und Einspeisung der ausgewerteten Stunden · nachgerechnet ohne EnergyPilot ${eur(t.cost_base)}`)
+          : kpi('home', '', 'Stromkosten ohne EnergyPilot', `${cnt('jc', nf(t.cost_base, 2))}<small>€</small>`, 'nachgerechnet; negativ = Einspeisung bringt mehr, als der Bezug kostet')}
       </div>
-      <div class="notice info" style="margin-top:16px">${ic('info')}<div>Für jeden Tag rechnet EnergyPilot drei Stromrechnungen aus den <b>echten</b> Messwerten und Preisen: <b>ohne EnergyPilot</b> (Akku im Eigenverbrauch, wie er tatsächlich lief), <b>mit EnergyPilot</b> (die Empfehlungen, die zur jeweiligen Stunde aus den Prognosen entstanden, wären befolgt worden) und <b>optimal</b> (im Nachhinein bestmöglich). Liegt „mit EnergyPilot“ dauerhaft nahe an „optimal“, sind Prognosen und Planung verlässlich genug für die Steuerung. Die Ersparnis berücksichtigt auch, wie viel Energie am Ende noch im Akku steckt. Grundlage ist der Grundverbrauch – E-Auto und Heizstab sind nicht enthalten.</div></div>
+      <div class="notice info" style="margin-top:16px">${ic('info')}<div>Für jeden Tag rechnet EnergyPilot drei Stromrechnungen aus den <b>echten</b> Messwerten und Preisen: <b>ohne EnergyPilot</b> (Akku im Eigenverbrauch, wie er tatsächlich lief), <b>mit EnergyPilot</b> (die Empfehlungen, die zur jeweiligen Stunde aus den Prognosen entstanden, wären befolgt worden) und <b>optimal</b> (im Nachhinein bestmöglich). Liegt „mit EnergyPilot“ dauerhaft nahe an „optimal“, sind Prognosen und Planung verlässlich genug für die Steuerung. Die Ersparnis berücksichtigt auch, wie viel Energie am Ende noch im Akku steckt. ${d.load_kind === 'house' ? `Gerechnet wird mit dem gesamten gemessenen Hausverbrauch – inklusive E-Auto, das auch aus dem Akku geladen wird${d.heater_surplus ? '. Der Heizstab läuft nur mit PV-Überschuss: Er nimmt in der Nachrechnung nur auf, was sonst eingespeist würde' : ' und Heizstab'}. Zur Kontrolle steht daneben die <b>gemessene</b> Rechnung aus Netzbezug und Einspeisung.` : 'Grundlage ist der Grundverbrauch – für E-Auto und Heizstab fehlt der Hausverbrauch-Sensor.'} Ein Klick auf einen Tag zeigt die Aufteilung.</div></div>
       <div class="card" style="margin-top:16px"><div class="card-head"><h2>Ersparnis pro Tag</h2></div><div class="card-body">
         <div class="legend"><span class="static"><i class="box" style="background:var(--ok)"></i>Mit EnergyPilot gespart</span><span class="static"><i style="background:var(--text-2)"></i>Im Nachhinein möglich</span></div>
         <div class="chart" id="jChart"></div></div></div>
       <div class="card"><div class="card-head"><h2>Tage <span class="sub">Klick zeigt die einzelnen Stunden</span></h2></div><div class="card-body flush"><div class="table-wrap"><table class="table compact">
-        <thead><tr><th>Tag</th><th>Empfehlungen</th><th class="num">PV kWh<br><span class="faint">Prognose → Ist</span></th><th class="num">Verbrauch kWh<br><span class="faint">Prognose → Ist</span></th><th class="num">ohne EnergyPilot</th><th class="num">mit EnergyPilot</th><th class="num">optimal</th><th class="num">gespart</th></tr></thead><tbody>
+        <thead><tr><th>Tag</th><th>Empfehlungen</th><th class="num">PV kWh<br><span class="faint">Prognose → Ist</span></th><th class="num">Verbrauch kWh<br><span class="faint">Prognose → Ist</span></th><th class="num">gemessen</th><th class="num">ohne EnergyPilot</th><th class="num">mit EnergyPilot</th><th class="num">optimal</th><th class="num">gespart</th></tr></thead><tbody>
         ${d.days.map((x, i) => `<tr class="click" data-i="${i}"><td class="nowrap">${fmtDay(dayTs(x.day))}${x.complete_hours < x.hours ? ` <span class="faint" title="Stunden mit vollständigen Messwerten">(${x.complete_hours}/${x.hours} h)</span>` : ''}</td>
           <td>${x.charge_hours ? `<span class="badge accent">${ic('plug')}${x.charge_hours} h laden</span> ` : ''}${x.hold_hours ? `<span class="badge warn">${ic('battery')}${x.hold_hours} h halten</span>` : ''}${!x.charge_hours && !x.hold_hours ? '<span class="faint nowrap">nur Eigenverbrauch</span>' : ''}</td>
           <td class="num">${nf(x.pv_fc, 1)} → ${x.pv == null ? '–' : nf(x.pv, 1)}</td><td class="num">${nf(x.load_fc, 1)} → ${x.load == null ? '–' : nf(x.load, 1)}</td>
-          <td class="num">${eur(x.cost_base)}</td><td class="num">${eur(x.cost_plan)}</td><td class="num">${eur(x.cost_best)}</td>
+          <td class="num">${eur(x.cost_real)}</td><td class="num">${eur(x.cost_base)}</td><td class="num">${eur(x.cost_plan)}</td><td class="num">${eur(x.cost_best)}</td>
           <td class="num ${x.saved > 0.005 ? 'best' : x.saved < -0.005 ? 'pos' : ''}">${x.saved == null ? '–' : eur(x.saved)}</td></tr>`).join('')}
         </tbody></table></div></div></div>`;
     chart($('#jChart'), {
@@ -719,18 +721,34 @@
       emptyText: 'Noch keine vollständig ausgewerteten Tage.',
     });
     $$('#jDays button').forEach((b) => b.addEventListener('click', () => { store.set('journalDays', Number(b.dataset.v)); navigate(); }));
-    $$('tr.click[data-i]').forEach((tr) => tr.addEventListener('click', () => journalDay(d.days[Number(tr.dataset.i)])));
+    $$('tr.click[data-i]').forEach((tr) => tr.addEventListener('click', () => journalDay(d.days[Number(tr.dataset.i)], d)));
   }
-  function journalDay(x) {
+  function journalDay(x, d) {
     const diff = (fc, act) => (act == null ? '' : ` <span class="faint">(${signed((fc - act), 2)})</span>`);
+    const bl = x.bills || {};
+    const billRow = (key, label, note) => {
+      const v = bl[key];
+      return v ? `<tr${key === 'real' ? ' class="strong"' : ''}><td>${label}${note ? `<div class="faint" style="font-size:12px">${note}</div>` : ''}</td><td class="num">${nf(v.import_kwh, 2)}</td><td class="num">${eur(v.import_eur)}</td><td class="num">${nf(v.export_kwh, 2)}</td><td class="num">${eur(-v.export_eur)}</td><td class="num"><b>${eur(v.total_eur)}</b></td></tr>` : '';
+    };
+    const other = x.house != null ? Math.max(0, x.house - (x.heater || 0) - (x.ev || 0)) : null;
+    const grid = (h) => (h.grid_import == null ? '–' : h.grid_import > 0.005 ? `↓ ${nf(h.grid_import, 2)}` : h.grid_export > 0.005 ? `↑ ${nf(h.grid_export, 2)}` : '0');
     modal({
       title: `Protokoll – ${fmtDate(dayTs(x.day))}`, wide: true,
-      body: `<div class="table-wrap"><table class="table compact"><thead><tr><th>Stunde</th><th>Empfehlung</th><th class="num">ct/kWh</th><th class="num">PV kWh<br><span class="faint">Prognose (Abw.)</span></th><th class="num">Verbrauch kWh<br><span class="faint">Prognose (Abw.)</span></th><th class="num">Akku % am Stundenende<br><span class="faint">geplant / Ist</span></th></tr></thead><tbody>
+      body: `${x.bills ? `<p class="explain">${x.complete_hours} ausgewertete Stunden · PV ${kwh(x.pv, 1)} · Verbrauch ${kwh(x.house, 1)}${x.house != null && (x.heater != null || x.ev != null) ? ` <span class="faint">(davon ${[x.heater != null ? `Heizstab ${kwh(x.heater, 1)}` : '', x.ev != null ? `E-Auto ${kwh(x.ev, 1)}` : '', `übrige ${kwh(other, 1)}`].filter(Boolean).join(', ')})</span>` : ''}</p>
+        <div class="table-wrap" style="margin-bottom:16px"><table class="table compact"><thead><tr><th>Stromrechnung</th><th class="num">Bezug kWh</th><th class="num">Bezug €</th><th class="num">Einspeisung kWh</th><th class="num">Vergütung €</th><th class="num">Summe</th></tr></thead><tbody>
+          ${billRow('real', 'Gemessen', 'Netzbezug und Einspeisung laut Sensor')}
+          ${billRow('base', 'Ohne EnergyPilot', 'nachgerechnet: Akku im Eigenverbrauch')}
+          ${billRow('plan', 'Mit EnergyPilot', 'nachgerechnet: Empfehlungen befolgt')}
+          ${billRow('best', 'Optimal', 'im Nachhinein bestmöglich')}
+        </tbody></table></div>
+        <p class="faint" style="font-size:12.5px;margin:-6px 0 16px">Summe = Bezug − Vergütung (Einspeisevergütung ${ctkwh(d.feed_in_ct, 2)}); negativ = die Einspeisung bringt mehr, als der Bezug kostet.${d.heater_surplus && x.heater ? ` Der Heizstab läuft nur mit Überschuss und nimmt in der Nachrechnung auf, was sonst eingespeist würde (ohne EnergyPilot ${kwh(bl.base && bl.base.heater_kwh, 1)}, gemessen ${kwh(x.heater, 1)}).` : ''} Weicht „ohne EnergyPilot“ stark von „gemessen“ ab, rechnet die Simulation den Akku anders, als er sich tatsächlich verhält. „Gespart“ und „möglich“ rechnen zusätzlich die Energie, die am Ende noch im Akku steckt.</p>` : ''}
+        <div class="table-wrap"><table class="table compact"><thead><tr><th>Stunde</th><th>Empfehlung</th><th class="num">ct/kWh</th><th class="num">PV kWh<br><span class="faint">Prognose (Abw.)</span></th><th class="num">Grundverbr. kWh<br><span class="faint">Prognose (Abw.)</span></th><th class="num">Verbrauch<br><span class="faint">gesamt kWh</span></th><th class="num">Netz kWh<br><span class="faint">gemessen</span></th><th class="num">Akku % am Stundenende<br><span class="faint">geplant / Ist</span></th></tr></thead><tbody>
         ${x.detail.map((h) => `<tr${h.complete ? '' : ' class="offline"'}><td class="nowrap">${fmtHour(h.ts)}–${fmtHour(h.ts + 3600)}</td><td><span class="badge ${MODE[h.mode][2]}">${ic(MODE[h.mode][1])}${MODE[h.mode][0]}</span></td>
           <td class="num">${nf(h.price, 1)}</td><td class="num">${nf(h.pv_fc, 2)}${diff(h.pv_fc, h.pv)}</td><td class="num">${nf(h.load_fc, 2)}${diff(h.load_fc, h.load)}</td>
+          <td class="num">${h.house == null ? '–' : nf(h.house, 2)}</td><td class="num" title="↓ Bezug, ↑ Einspeisung">${grid(h)}</td>
           <td class="num">${nf(h.soc_plan, 0)} / ${h.soc_actual == null ? '–' : nf(h.soc_actual, 0)}</td></tr>`).join('')}
         </tbody></table></div>
-        <p class="faint" style="font-size:12.5px;margin:10px 0 0">Abw. = Prognose minus Messwert (+ = zu hoch vorhergesagt). Akku: geplanter und gemessener Ladezustand am Ende der Stunde. Solange EnergyPilot nicht steuert, läuft der Akku im Eigenverbrauch – bei „laden“ und „halten“ zeigt der geplante Wert, wohin der Plan ihn gebracht hätte.</p>`,
+        <p class="faint" style="font-size:12.5px;margin:10px 0 0">Abw. = Prognose minus Messwert (+ = zu hoch vorhergesagt). Die Verbrauchsprognose gilt für den Grundverbrauch ohne E-Auto und Heizstab. Netz: ↓ Bezug, ↑ Einspeisung. Akku: geplanter und gemessener Ladezustand am Ende der Stunde. Solange EnergyPilot nicht steuert, läuft der Akku im Eigenverbrauch – bei „laden“ und „halten“ zeigt der geplante Wert, wohin der Plan ihn gebracht hätte.</p>`,
     });
   }
 
@@ -1466,7 +1484,8 @@
           <p class="explain">Mit der Netzleistung allein heben sich Bezug und Einspeisung innerhalb einer Stunde gegenseitig auf. Viele Speicher und Smartmeter liefern beide Werte getrennt.</p>
           ${row('grid_import')}${row('grid_export')}</details>`)}
       ${section('battery', 'Batterie', 'Für Planung und Reichweite', ['battery_soc', 'battery_power'], row('battery_soc') + row('battery_power'))}
-      ${section('car', 'Große Verbraucher', 'Werden vom Hausverbrauch abgezogen – die Prognose lernt nur den Grundverbrauch', ['ev', 'heater'], row('ev') + row('heater'))}
+      ${section('car', 'Große Verbraucher', 'Werden vom Hausverbrauch abgezogen – die Prognose lernt nur den Grundverbrauch', ['ev', 'heater'], row('ev') + row('heater'),
+        `<div class="sens-row"><div></div><label class="check" style="font-size:13px"><input type="checkbox" id="n_hsurplus" ${(S.settings.devices || {}).heater_surplus !== false ? 'checked' : ''}><span>Heizstab läuft nur mit PV-Überschuss <span class="faint">– eigene Regelung, nimmt nie Strom aus Akku oder Netz</span></span></label></div>`)}
       <div class="card sens-sec"><div class="card-head"><div class="avatar accent">${ic('pin')}</div><h2>Standort<div class="faint" style="font-weight:400;font-size:12.5px" id="locSub">${locSet ? `Eigener Standort (${nf(+loc.latitude, 3)}, ${nf(+loc.longitude, 3)})` : `Aus Home Assistant${ha ? ` (${nf(ha[0], 3)}, ${nf(ha[1], 3)})` : ''}`}</div></h2>
         <button class="btn sm" id="locToggle">${locSet ? 'Ändern' : 'Abweichend eintragen'}</button></div>
         <div class="card-body ${locSet ? '' : 'hidden'}" id="locBody">
@@ -1506,6 +1525,7 @@
       sensors: Object.fromEntries(Object.entries(F).map(([k, f]) => [k, $(`#${f[0]}`).value])),
       location: { latitude: $('#n_lat').value, longitude: $('#n_lon').value },
       invert: Object.fromEntries(Object.keys(F).filter((k) => F[k][5]).map((k) => [k, $(`#inv_${k}`).checked])),
+      devices: { heater_surplus: $('#n_hsurplus').checked },
     });
     let saved = JSON.stringify(values());
     const dirty = () => {
@@ -1523,14 +1543,15 @@
       explain(key);
     });
     ['n_lat', 'n_lon'].forEach((id) => $(`#${id}`).addEventListener('input', dirty));
+    $('#n_hsurplus').addEventListener('change', dirty);
     $('#locToggle').addEventListener('click', () => { const b = $('#locBody'); b.classList.toggle('hidden'); if (!b.classList.contains('hidden')) $('#n_lat').focus(); });
     states();
     consumptionCheck($('#consCheck'));
     $('#n_reset').addEventListener('click', () => navigate());
     $('#n_save').addEventListener('click', (e) => withBusy(e.currentTarget, async () => {
       const v = values();
-      if (await saveSettings(v)) { saved = JSON.stringify(v); dirty(); consumptionCheck($('#consCheck')); }
-    }));
+      if (await saveSettings(v)) { saved = JSON.stringify(v); consumptionCheck($('#consCheck')); }
+    }).then(dirty));  // after withBusy re-enabled the button
   }
 
   function renderLook(el) {

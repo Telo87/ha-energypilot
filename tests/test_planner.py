@@ -287,3 +287,45 @@ def test_battery_range_only_while_discharging(tmp_path):
     assert rt["state"] == "idle" and rt["now_hours"] is None
     rt = hub.battery_runtime(5.5, hours, 3420, now=0, battery_w=-2200)  # PV covers part of the house
     assert rt["state"] == "discharging" and rt["now_hours"] == pytest.approx(usable / 2.2, abs=0.01)
+
+
+def test_journal_uses_whole_house_and_measured_grid(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"location": {"latitude": 52, "longitude": 9}, "tariff": {"feed_in_ct": 8},
+                     "sensors": {"house": "sensor.house", "heater": "sensor.heater", "grid": "sensor.grid"}})
+    settings.upsert_array({"name": "Dach", "planes": [{"kwp": 5}], "sensor": "sensor.pv"})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    aid = hub.settings.arrays[0]["id"]
+    start = hub.midnight(int(time.time())) - 86400 + 11 * 3600  # yesterday noon
+    for i in range(2):
+        t = start + i * 3600
+        hub.db.log_plan((t, "normal", 30.0, 3.0, 0.5, 100.0, 100.0, 100.0, t))
+        hub.db.put_actual([(aid, t, 3000.0), ("house", t, 2500.0), ("heater", t, 2000.0), ("base", t, 500.0),
+                           ("grid", t, -500.0)])  # full battery, heater eats the surplus
+        hub.db.put_prices([(t + q * 900, 900, 100.0) for q in range(4)])
+    day = next(d for d in hub.journal(days=3)["days"] if d["hours"])
+    assert day["house"] == 5.0 and day["heater"] == 4.0 and day["load"] == 1.0
+    real, base = day["bills"]["real"], day["bills"]["base"]
+    assert real["export_kwh"] == 1.0 and real["import_kwh"] == 0
+    assert base["export_kwh"] == pytest.approx(1.0)  # the simulation now sees the heater, too
+    assert day["cost_real"] == pytest.approx(-0.08)
+
+
+def test_surplus_heater_never_empties_the_battery(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"location": {"latitude": 52, "longitude": 9}, "tariff": {"feed_in_ct": 8},
+                     "sensors": {"house": "sensor.house", "heater": "sensor.heater", "grid": "sensor.grid"}})
+    settings.upsert_array({"name": "Dach", "planes": [{"kwp": 5}], "sensor": "sensor.pv"})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    aid = hub.settings.arrays[0]["id"]
+    t = hub.midnight(int(time.time())) - 86400 + 12 * 3600
+    # half-full battery, 3 kWh PV, 0.5 kWh house plus 2 kWh heating rod that took the export
+    hub.db.log_plan((t, "normal", 30.0, 3.0, 0.5, 50.0, 50.0, 50.0, t))
+    hub.db.put_actual([(aid, t, 3000.0), ("house", t, 2500.0), ("heater", t, 2000.0), ("base", t, 500.0), ("grid", t, 0.0)])
+    hub.db.put_prices([(t + q * 900, 900, 100.0) for q in range(4)])
+    base = next(d for d in hub.journal(days=3)["days"] if d["hours"])["bills"]["base"]
+    # the battery takes the surplus first (up to 3.3 kW); the rod only gets what would have been exported
+    assert base["heater_kwh"] == 0 and base["export_kwh"] == 0 and base["import_kwh"] == 0
+    hub.settings.update({"devices": {"heater_surplus": False}})
+    base = next(d for d in hub.journal(days=3)["days"] if d["hours"])["bills"]["base"]
+    assert "heater_kwh" in base and base["import_kwh"] == 0  # as a normal load it eats into the surplus instead
