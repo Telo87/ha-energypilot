@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Neu: **Aufschlag aus einem Preis berechnen** (Einstellungen › Strompreis) – Gesamtpreise aus der App des Anbieters mit Tag und Uhrzeit eintragen, EnergyPilot rechnet den Aufschlag netto aus dem Börsenpreis der jeweiligen Viertelstunde zurück, bildet bei mehreren Preisen den Mittelwert und zeigt, ob sie zusammenpassen; mit einem Klick übernehmen
+- Das Rechenbeispiel in den Strompreis-Einstellungen nutzt den aktuellen Börsenpreis
+
 ## 0.4.0
 
 - Neu: **Live-Korrektur** – die gemessene PV-Leistung der letzten Stunde wird mit der Prognose verglichen und korrigiert die laufende und die nächsten zwei Stunden (Gewichte 0,4 / 0,2 / 0,1, an echten Daten abgestimmt: rund 10 % genauer für die nächste Stunde). Eigene Quelle „EnergyPilot (live korrigiert)“ im Prognose-Check (kurzfristig); der Planer rechnet damit

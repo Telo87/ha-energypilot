@@ -178,6 +178,10 @@ Endpreis = (Börsenpreis + Aufschlag netto) × (1 + MwSt)
 Der Aufschlag netto ist die Summe aus Netzentgelt, Umlagen, Stromsteuer und dem Aufschlag des
 Anbieters, jeweils in ct/kWh ohne Mehrwertsteuer. Die Werte stehen im Vertrag bzw. auf der Rechnung.
 
+Einfacher geht es mit **„Aufschlag aus einem Preis berechnen“**: einen oder mehrere Gesamtpreise aus der
+App des Anbieters (z. B. sonnen-App, viertelstündlicher Preis) mit Tag und Uhrzeit eintragen. EnergyPilot
+rechnet `Preis ÷ (1 + MwSt) − Börsenpreis` für jede Viertelstunde aus und übernimmt den Mittelwert.
+
 ## Sensoren in Home Assistant
 
 Mit der Option *Sensoren in Home Assistant anlegen* stellt EnergyPilot bereit:

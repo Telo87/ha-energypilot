@@ -1193,6 +1193,7 @@
   async function renderTariff(el) {
     setHeader('Einstellungen', 'Dynamischer Stromtarif');
     const t = S.settings.tariff;
+    if (!S.overview) { try { S.overview = await api('overview'); } catch { /* example uses a placeholder */ } }
     const draw = () => {
       el.innerHTML = `<div class="grid cols-2">
         <div class="card"><div class="card-head"><div class="avatar accent">${ic('euro')}</div><h2>Arbeitspreis</h2></div><div class="card-body">
@@ -1205,7 +1206,49 @@
           </div>
           <div class="notice info" id="t_prev">${ic('info')}<div></div></div>
           <div class="row" style="margin-top:14px"><button class="btn primary" id="t_save">${ic('check')}Speichern</button></div>
+        </div></div>
+        <div class="card"><div class="card-head"><div class="avatar accent">${ic('target')}</div><h2>Aufschlag aus einem Preis berechnen</h2></div><div class="card-body">
+          <p class="explain">Trag einen Gesamtpreis aus der <b>sonnen-App</b> (oder von der Rechnung) ein – mit Tag und Uhrzeit der Viertelstunde. EnergyPilot sucht den Börsenpreis dieser Viertelstunde und rechnet den Aufschlag zurück. Mit zwei, drei Preisen zu verschiedenen Uhrzeiten siehst du auch, ob alles zusammenpasst.</p>
+          <div class="calib-head"><span>Tag</span><span>Uhrzeit</span><span>Gesamtpreis (ct/kWh)</span><span></span></div>
+          <div id="c_rows"></div>
+          <button type="button" class="btn sm" id="c_add">${ic('plus')}Weiteren Preis</button>
+          <div id="c_result" style="margin-top:14px"></div>
         </div></div></div>`;
+      // markup from sample prices: price / (1 + VAT) - spot price of that quarter hour
+      const calibRow = () => `<div class="calib-row" data-calib><input class="input" type="date" data-k="day" value="${localDay()}"><input class="input" type="time" step="900" data-k="time" value="08:15"><input class="input" type="number" step="0.01" data-k="price" placeholder="z. B. 42,87"><button type="button" class="icon-btn" data-del title="Entfernen">${ic('x')}</button></div>`;
+      const calcMarkup = async () => {
+        const rows = $$('[data-calib]').map((r) => ({ day: r.querySelector('[data-k=day]').value, time: r.querySelector('[data-k=time]').value, price: Number(String(r.querySelector('[data-k=price]').value).replace(',', '.')) })).filter((r) => r.day && r.time && r.price > 0);
+        const out = $('#c_result');
+        if (!rows.length) { out.innerHTML = ''; return; }
+        const vat = Number($('#t_vat').value) || 0;
+        const days = {};
+        const results = [];
+        for (const r of rows) {
+          try { days[r.day] = days[r.day] || (await api(`prices?day=${r.day}&days=1`)).slots; } catch (e) { out.innerHTML = errorBox(e.message); return; }
+          const ts = new Date(`${r.day}T${r.time}:00`).getTime() / 1000;
+          const slot = days[r.day].find((s) => s.ts <= ts && ts < s.ts + s.dur);
+          results.push({ ...r, spot: slot ? slot.spot : null, markup: slot ? r.price / (1 + vat / 100) - slot.spot : null });
+        }
+        const ok = results.filter((r) => r.markup != null);
+        const mean = ok.length ? ok.reduce((a, r) => a + r.markup, 0) / ok.length : null;
+        const spread = ok.length > 1 ? Math.max(...ok.map((r) => r.markup)) - Math.min(...ok.map((r) => r.markup)) : 0;
+        out.innerHTML = `<div class="table-wrap"><table class="table compact"><thead><tr><th>Viertelstunde</th><th class="num">Gesamt</th><th class="num">Börse netto</th><th class="num">Aufschlag netto</th></tr></thead><tbody>
+            ${results.map((r) => `<tr><td class="nowrap">${fmtDay(dayTs(r.day))} ${esc(r.time)}</td><td class="num">${nf(r.price, 2)} ct</td><td class="num">${r.spot == null ? '<span class="pos">kein Börsenpreis</span>' : `${nf(r.spot, 2)} ct`}</td><td class="num">${r.markup == null ? '–' : `<b>${nf(r.markup, 2)} ct</b>`}</td></tr>`).join('')}
+          </tbody></table></div>
+          ${mean == null ? `<div class="notice" style="margin-top:10px">${ic('alert')}<div>Für diese Zeit liegt kein Börsenpreis vor – EnergyPilot speichert die Preise ab dem ersten Start, Tage davor sind nicht verfügbar.</div></div>`
+            : `<div class="notice ${spread > 0.3 ? '' : 'info'}" style="margin-top:10px">${ic(spread > 0.3 ? 'alert' : 'checkCircle')}<div>Aufschlag netto: <b>${nf(mean, 2)} ct/kWh</b>${ok.length > 1 ? (spread > 0.3 ? ` – die Werte weichen um ${nf(spread, 2)} ct voneinander ab. Prüfe Uhrzeit und Preis; manche Anbieter rechnen stündlich statt viertelstündlich ab.` : ' – die Preise passen gut zusammen.') : ''}</div></div>
+              <button class="btn primary sm" id="c_apply" style="margin-top:10px">${ic('check')}Als Aufschlag übernehmen</button>`}`;
+        if ($('#c_apply')) $('#c_apply').addEventListener('click', () => { $('#t_markup').value = mean.toFixed(2); prev(); $('#t_markup').focus(); toast('Aufschlag eingetragen – mit „Speichern“ übernehmen.', 'info'); });
+      };
+      let calcT = 0;
+      const bindRow = (r) => {
+        r.querySelectorAll('input').forEach((i) => i.addEventListener('input', () => { clearTimeout(calcT); calcT = setTimeout(calcMarkup, 400); }));
+        r.querySelector('[data-del]').addEventListener('click', () => { r.remove(); calcMarkup(); });
+      };
+      const addRow = () => { $('#c_rows').insertAdjacentHTML('beforeend', calibRow()); const rows = $$('[data-calib]'); bindRow(rows[rows.length - 1]); };
+      addRow();
+      $('#c_add').addEventListener('click', addRow);
+      $('#t_vat').addEventListener('input', () => { clearTimeout(calcT); calcT = setTimeout(calcMarkup, 400); });
       const prev = () => {
         const spot = S.overview && S.overview.price ? S.overview.price.spot : 10;
         const mk = Number($('#t_markup').value) || 0; const vat = Number($('#t_vat').value) || 0;
