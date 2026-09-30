@@ -156,6 +156,13 @@ async def cost_months(request: web.Request) -> web.Response:
     return _ok(await asyncio.to_thread(_hub(request).cost_months, 12))
 
 
+@routes.get("/api/setup-check")
+async def setup_check(request: web.Request) -> web.Response:
+    from . import setupcheck
+
+    return _ok(await setupcheck.run(_hub(request)))
+
+
 @routes.get("/api/plan")
 async def plan(request: web.Request) -> web.Response:
     hub = _hub(request)

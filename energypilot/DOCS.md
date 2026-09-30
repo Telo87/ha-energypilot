@@ -22,6 +22,18 @@ Nach dem Speichern lädt EnergyPilot im Hintergrund:
 Der **Prognose-Check** zeigt damit schon nach wenigen Minuten, welche Quelle bei dir am
 genauesten ist. Er muss nicht erst wochenlang Daten sammeln.
 
+## Einrichtung prüfen
+
+Die Seite **Einrichtung** (unter Verwaltung) prüft, ob alles vorhanden und plausibel ist, und verlinkt zur
+passenden Einstellung. Geprüft werden unter anderem:
+
+- ob die gewählten Sensoren existieren, die richtige Einheit und eine Langzeitstatistik haben und aktuelle Werte liefern,
+- ob die gemessene Höchstleistung jeder PV-Anlage zur eingetragenen kWp-Leistung passt,
+- ob die **Vorzeichen** stimmen: bei großem PV-Überschuss muss die Netzleistung Einspeisung zeigen und die Batterie laden,
+- ob Aufschlag, Mehrwertsteuer, Einspeisevergütung und Batteriedaten in einem üblichen Bereich liegen.
+
+Gibt es Probleme, zeigt das Menü deren Anzahl und die Übersicht einen Hinweis.
+
 ## Messsensor
 
 Der Sensor braucht eine **Langzeitstatistik**, also ein Attribut `state_class`. Die
@@ -156,11 +168,11 @@ rechnet es für jeden Tag drei Stromrechnungen aus den **echten** Werten:
 
 | Rechnung | Bedeutung |
 |---|---|
-| ohne Plan | Akku im Eigenverbrauch – so, wie er tatsächlich lief |
-| mit Plan | die Empfehlungen, die aus den Prognosen entstanden, wären befolgt worden |
+| ohne EnergyPilot | Akku im Eigenverbrauch – so, wie er tatsächlich lief |
+| mit EnergyPilot | die Empfehlungen, die aus den Prognosen entstanden, wären befolgt worden |
 | optimal | im Nachhinein bestmöglicher Fahrplan mit perfektem Wissen |
 
-„Mit Plan gespart“ kann auch negativ sein, wenn Prognosen danebenlagen. Liegt der Wert über einige Tage
+„Mit EnergyPilot gespart“ kann auch negativ sein, wenn Prognosen danebenlagen. Liegt der Wert über einige Tage
 nahe an „optimal“ (Anteil „davon erreicht“ hoch), sind Prognosen und Planung verlässlich genug, um
 EnergyPilot die Steuerung zu überlassen. Grundlage ist der Grundverbrauch; E-Auto und Heizstab sind nicht
 enthalten.

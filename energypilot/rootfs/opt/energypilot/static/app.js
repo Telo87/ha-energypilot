@@ -385,12 +385,13 @@
     { id: 'day', title: 'Tagesverlauf', icon: 'chart' },
     { id: 'prices', title: 'Strompreise', icon: 'euro' },
     { id: 'costs', title: 'Kosten', icon: 'wallet' },
-    { id: 'settings', title: 'Einstellungen', icon: 'gear', section: 'Verwaltung' },
+    { id: 'setup', title: 'Einrichtung', icon: 'checkCircle', section: 'Verwaltung' },
+    { id: 'settings', title: 'Einstellungen', icon: 'gear' },
   ];
   function renderNav() {
     const cur = currentPage();
     $('#nav').innerHTML = PAGES.map((p) => `${p.section ? `<div class="nav-section">${p.section}</div>` : ''}
-      <a href="#/${p.id}" class="${p.id === cur ? 'active' : ''}">${ic(p.icon)}<span>${p.title}</span></a>`).join('');
+      <a href="#/${p.id}" class="${p.id === cur ? 'active' : ''}">${ic(p.icon)}<span>${p.title}</span>${p.id === 'setup' && S.check && S.check.summary.err ? `<span class="badge count">${S.check.summary.err}</span>` : ''}</a>`).join('');
   }
   function currentPage() {
     const id = (location.hash.replace(/^#\/?/, '').split('?')[0]) || 'dashboard';
@@ -528,7 +529,8 @@
       const statusRows = Object.entries(ov.status).filter(([k]) => !k.startsWith('act:') || !ov.status[k].ok).map(([k, s]) => `<div class="list-item"><span class="dot ${s.ok ? 'ok' : 'err'}"></span><div class="grow"><div class="title">${esc(k === 'price' ? 'Börsenstrompreis' : k === 'actual' ? 'Messwerte aus Home Assistant' : k === 'ha' ? 'Home Assistant' : s.label)}</div><div class="meta ${s.ok ? '' : 'err'}">${s.ok ? `abgerufen ${fmtAgo(s.at)}` : esc(s.text)}</div></div></div>`).join('');
       const acc = (ov.accuracy || []).slice(0, 5);
       const bf = ov.backfill;
-      el.innerHTML = `${nowCard}<div class="grid kpis">${kpis}</div>
+      const chk = S.check && S.check.summary.err ? `<a class="notice setup-hint" href="#/setup">${ic('alert')}<div><b>${S.check.summary.err} ${S.check.summary.err === 1 ? 'Einstellung braucht' : 'Einstellungen brauchen'} Aufmerksamkeit</b> – zur Einrichtung</div></a>` : '';
+      el.innerHTML = `${chk}${nowCard}<div class="grid kpis">${kpis}</div>
         <div class="grid dash">
           <div class="card"><div class="card-head"><h2>PV-Erzeugung &amp; Verbrauch – heute und morgen <span class="sub">stündlich · Prognose kurzfristig</span></h2></div>
             <div class="card-body">${legendHTML({ ...MEASURED, label: 'Gemessen', color: 'var(--measured)' }, lines, hidden)}<div class="chart tall" id="pvChart"></div></div></div>
@@ -558,6 +560,7 @@
       drawn = true;
     };
     await load();
+    loadCheck().then(() => { if (!stale(token) && S.overview) draw(S.overview); }).catch(() => {});
     const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 15000);
     S.cleanup.push(() => clearInterval(timer));
   }
@@ -620,7 +623,7 @@
           ${kpi('clock', 'warn', 'Reichweite', rt.now_hours != null ? esc(fmtDur(rt.now_hours)) : '–', house ? `beim aktuellen Verbrauch von ${fmtW(house)}` : 'Hausverbrauch-Sensor fehlt')}
           ${kpi('sun', 'up', 'Akku leer (Prognose)', `<span class="kpi-text">${rt.empty_at ? esc(fmtWhen(rt.empty_at)) : `nicht vor ${esc(fmtWhen(rt.until, true))}`}</span>`, rt.empty_at ? (rt.full_at && rt.full_at > rt.empty_at ? `wieder voll ${fmtWhen(rt.full_at)}` : 'mit PV-Erzeugung und Verbrauchsprognose') : rt.full_at ? `voll ${fmtWhen(rt.full_at)} · reicht bis ${fmtWhen(rt.until, true)}` : `bis ${fmtWhen(rt.until, true)}`)}
           ${kpi('home', '', 'Verbrauch (Prognose)', `${nf(loadSum(0, tomorrowTs), 1)}<small>kWh</small>`, `bis Mitternacht · morgen ${nf(loadSum(tomorrowTs, afterTs), 1)} kWh · ohne E-Auto/Heizstab`)}
-          ${p.ok ? kpi('euro', p.savings_eur > 0.005 ? 'ok' : '', 'Ersparnis durch Plan', `${cnt('sav', nf(Math.max(0, p.savings_eur), 2))}<small>€</small>`, `Stromkosten ${nf(p.cost_eur, 2)} € statt ${nf(p.baseline_eur, 2)} € bis ${fmtWhen(p.horizon_end, true)}`) : ''}
+          ${p.ok ? kpi('euro', p.savings_eur > 0.005 ? 'ok' : '', 'Ersparnis durch EnergyPilot', `${cnt('sav', nf(Math.max(0, p.savings_eur), 2))}<small>€</small>`, `Stromkosten ${nf(p.cost_eur, 2)} € statt ${nf(p.baseline_eur, 2)} € ohne EnergyPilot bis ${fmtWhen(p.horizon_end, true)}`) : ''}
         </div>
         <div class="grid cols-2">
           <div class="card"><div class="card-head"><h2>Akku-Ladezustand <span class="sub">geplant</span></h2></div><div class="card-body"><div class="chart" id="socChart"></div></div></div>
@@ -677,17 +680,17 @@
     const withCost = d.days.filter((x) => x.cost_base != null).slice().reverse();
     el.innerHTML = `<div class="toolbar"><div class="seg" id="jDays">${[[7, '7 Tage'], [14, '14 Tage'], [30, '30 Tage'], [90, '90 Tage']].map(([v, l]) => `<button data-v="${v}" class="${days === v ? 'active' : ''}">${l}</button>`).join('')}</div></div>
       <div class="grid kpis">
-        ${kpi('euro', t.saved >= 0 ? 'ok' : 'err', 'Mit Plan gespart', `${cnt('js', nf(t.saved, 2))}<small>€</small>`, 'wenn alle Empfehlungen befolgt worden wären')}
+        ${kpi('euro', t.saved >= 0 ? 'ok' : 'err', 'Mit EnergyPilot gespart', `${cnt('js', nf(t.saved, 2))}<small>€</small>`, 'wenn der Akku allen Empfehlungen gefolgt wäre')}
         ${kpi('trophy', 'up', 'Im Nachhinein möglich', `${cnt('jp', nf(t.possible, 2))}<small>€</small>`, 'mit perfektem Wissen über Sonne und Verbrauch')}
         ${kpi('target', share != null && share >= 60 ? 'ok' : 'warn', 'Davon erreicht', share == null ? '–' : `${cnt('jq', nf(share, 0))}<small>%</small>`, share == null ? 'bisher keine Ersparnis möglich' : 'Anteil der möglichen Ersparnis')}
-        ${kpi('home', '', 'Stromkosten ohne Plan', `${cnt('jc', nf(t.cost_base, 2))}<small>€</small>`, 'so wie der Akku tatsächlich lief; negativ = Einnahmen überwiegen')}
+        ${kpi('home', '', 'Stromkosten ohne EnergyPilot', `${cnt('jc', nf(t.cost_base, 2))}<small>€</small>`, 'so wie der Akku tatsächlich lief; negativ = Einnahmen überwiegen')}
       </div>
-      <div class="notice info" style="margin-top:16px">${ic('info')}<div>Für jeden Tag rechnet EnergyPilot drei Stromrechnungen aus den <b>echten</b> Messwerten und Preisen: <b>ohne Plan</b> (Akku im Eigenverbrauch, wie er tatsächlich lief), <b>mit Plan</b> (die Empfehlungen, die zur jeweiligen Stunde aus den Prognosen entstanden, wären befolgt worden) und <b>optimal</b> (im Nachhinein bestmöglich). Liegt „mit Plan“ dauerhaft nahe an „optimal“, sind Prognosen und Planung verlässlich genug für die Steuerung. Grundlage ist der Grundverbrauch – E-Auto und Heizstab sind nicht enthalten.</div></div>
+      <div class="notice info" style="margin-top:16px">${ic('info')}<div>Für jeden Tag rechnet EnergyPilot drei Stromrechnungen aus den <b>echten</b> Messwerten und Preisen: <b>ohne EnergyPilot</b> (Akku im Eigenverbrauch, wie er tatsächlich lief), <b>mit EnergyPilot</b> (die Empfehlungen, die zur jeweiligen Stunde aus den Prognosen entstanden, wären befolgt worden) und <b>optimal</b> (im Nachhinein bestmöglich). Liegt „mit EnergyPilot“ dauerhaft nahe an „optimal“, sind Prognosen und Planung verlässlich genug für die Steuerung. Grundlage ist der Grundverbrauch – E-Auto und Heizstab sind nicht enthalten.</div></div>
       <div class="card" style="margin-top:16px"><div class="card-head"><h2>Ersparnis pro Tag</h2></div><div class="card-body">
-        <div class="legend"><span class="static"><i class="box" style="background:var(--ok)"></i>Mit Plan gespart</span><span class="static"><i style="background:var(--text-2)"></i>Im Nachhinein möglich</span></div>
+        <div class="legend"><span class="static"><i class="box" style="background:var(--ok)"></i>Mit EnergyPilot gespart</span><span class="static"><i style="background:var(--text-2)"></i>Im Nachhinein möglich</span></div>
         <div class="chart" id="jChart"></div></div></div>
       <div class="card"><div class="card-head"><h2>Tage <span class="sub">Klick zeigt die einzelnen Stunden</span></h2></div><div class="card-body flush"><div class="table-wrap"><table class="table compact">
-        <thead><tr><th>Tag</th><th>Empfehlungen</th><th class="num">PV kWh<br><span class="faint">Prognose → Ist</span></th><th class="num">Verbrauch kWh<br><span class="faint">Prognose → Ist</span></th><th class="num">ohne Plan</th><th class="num">mit Plan</th><th class="num">optimal</th><th class="num">gespart</th></tr></thead><tbody>
+        <thead><tr><th>Tag</th><th>Empfehlungen</th><th class="num">PV kWh<br><span class="faint">Prognose → Ist</span></th><th class="num">Verbrauch kWh<br><span class="faint">Prognose → Ist</span></th><th class="num">ohne EnergyPilot</th><th class="num">mit EnergyPilot</th><th class="num">optimal</th><th class="num">gespart</th></tr></thead><tbody>
         ${d.days.map((x, i) => `<tr class="click" data-i="${i}"><td class="nowrap">${fmtDay(dayTs(x.day))}${x.complete_hours < x.hours ? ` <span class="faint" title="Stunden mit vollständigen Messwerten">(${x.complete_hours}/${x.hours} h)</span>` : ''}</td>
           <td>${x.charge_hours ? `<span class="badge accent">${ic('plug')}${x.charge_hours} h laden</span> ` : ''}${x.hold_hours ? `<span class="badge warn">${ic('battery')}${x.hold_hours} h halten</span>` : ''}${!x.charge_hours && !x.hold_hours ? '<span class="faint nowrap">nur Eigenverbrauch</span>' : ''}</td>
           <td class="num">${nf(x.pv_fc, 1)} → ${x.pv == null ? '–' : nf(x.pv, 1)}</td><td class="num">${nf(x.load_fc, 1)} → ${x.load == null ? '–' : nf(x.load, 1)}</td>
@@ -696,7 +699,7 @@
         </tbody></table></div></div></div>`;
     chart($('#jChart'), {
       xs: withCost.map((x) => dayTs(x.day)), step: 86400, height: 200, tickCenter: true,
-      bar: { label: 'Mit Plan gespart', color: 'var(--ok)', cls: 'bar-save', values: withCost.map((x) => x.saved), clsFor: (i, v) => (v < 0 ? 'neg' : '') },
+      bar: { label: 'Mit EnergyPilot gespart', color: 'var(--ok)', cls: 'bar-save', values: withCost.map((x) => x.saved), clsFor: (i, v) => (v < 0 ? 'neg' : '') },
       lines: [{ key: 'possible', label: 'Im Nachhinein möglich', color: 'var(--text-2)', dash: true, values: withCost.map((x) => x.possible) }],
       fmt: (v) => eur(v), axisFmt: (v) => `${nf(v, 2)} €`, head: (ts) => fmtDay(ts), tick: (ts) => new Date(ts * 1000).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }),
       emptyText: 'Noch keine vollständig ausgewerteten Tage.',
@@ -979,6 +982,37 @@
     });
     bindNav();
     $$('tr[data-m]').forEach((tr) => tr.addEventListener('click', () => { location.hash = `#/costs?m=${tr.dataset.m}`; }));
+  }
+
+  // ------------------------------------------------------------------ setup
+  const LEVEL = { err: ['err', 'alert', 'Problem'], warn: ['warn', 'alert', 'Hinweis'], info: ['', 'info', 'Info'], ok: ['ok', 'checkCircle', 'OK'] };
+  async function loadCheck(force = false) {
+    if (!force && S.check && Date.now() / 1000 - S.check.at < 600) return S.check;
+    S.check = await api('setup-check');
+    renderNav();
+    return S.check;
+  }
+  async function renderSetup(el, token) {
+    const d = await loadCheck(true);
+    if (stale(token)) return;
+    const sm = d.summary;
+    setHeader('Einrichtung', `${sm.ok || 0} in Ordnung · ${sm.warn || 0} Hinweise · ${sm.err || 0} Probleme`, `<button class="btn" id="chkAgain">${ic('refresh')}<span class="hide-sm">Erneut prüfen</span></button>`);
+    const order = { err: 0, warn: 1, info: 2, ok: 3 };
+    const onlyIssues = store.get('setupIssues', false);
+    el.innerHTML = `<div class="toolbar"><label class="check"><input type="checkbox" id="chkIssues" ${onlyIssues ? 'checked' : ''}>Nur Probleme und Hinweise anzeigen</label></div>
+      ${!sm.err && !sm.warn ? `<div class="notice info" style="margin-bottom:16px">${ic('checkCircle')}<div><b>Alles eingerichtet.</b> EnergyPilot hat alles, was es braucht, und die Werte sind plausibel.</div></div>` : ''}
+      <div class="grid cols-2">${d.groups.map((g) => {
+        const checks = g.checks.slice().sort((a, b) => order[a.level] - order[b.level]).filter((c) => !onlyIssues || c.level === 'err' || c.level === 'warn');
+        const worst = g.checks.reduce((w, c) => (order[c.level] < order[w] ? c.level : w), 'ok');
+        return `<div class="card"><div class="card-head"><span class="dot ${LEVEL[worst][0]}"></span><h2>${esc(g.title)}</h2></div>
+          <div class="card-body flush"><div class="list">${checks.map((c) => `<div class="list-item check-item">
+            <div class="avatar ${LEVEL[c.level][0]}" style="width:30px;height:30px">${ic(LEVEL[c.level][1])}</div>
+            <div class="grow"><div class="title" style="white-space:normal">${esc(c.title)}</div>${c.text ? `<div class="meta" style="white-space:normal">${esc(c.text)}</div>` : ''}</div>
+            ${c.link && c.level !== 'ok' ? `<a class="btn sm" href="${c.link}">Beheben</a>` : ''}</div>`).join('')
+            || '<div class="muted" style="padding:6px 18px 14px;font-size:13px">Keine Probleme.</div>'}</div></div></div>`;
+      }).join('')}</div>`;
+    $('#chkAgain').addEventListener('click', () => navigate());
+    $('#chkIssues').addEventListener('change', (e) => { store.set('setupIssues', e.target.checked); navigate(); });
   }
 
   // --------------------------------------------------------------- settings
@@ -1440,7 +1474,7 @@
     draw();
   }
 
-  const RENDER = { costs: renderCosts, dashboard: renderDashboard, plan: renderPlan, journal: renderJournal, accuracy: renderAccuracy, day: renderDay, prices: renderPrices, settings: renderSettings };
+  const RENDER = { setup: renderSetup, costs: renderCosts, dashboard: renderDashboard, plan: renderPlan, journal: renderJournal, accuracy: renderAccuracy, day: renderDay, prices: renderPrices, settings: renderSettings };
   // -------------------------------------------------------------- UI pieces
   function toast(msg, type = 'ok') {
     const el = document.createElement('div');

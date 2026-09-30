@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from energypilot.config import Options, Settings
 from energypilot.db import Database
@@ -155,3 +157,41 @@ def test_costs_fall_back_to_signed_grid_value(tmp_path):
     hub.db.put_actual([("grid", start, -1500.0), ("grid", start + 3600, 500.0)])  # inverted: import, then export
     day = hub.costs(start, start + 86400)["days"][0]
     assert day["import_kwh"] == 1.5 and day["export_kwh"] == 0.5
+
+
+def test_setup_check_finds_wrong_settings(tmp_path):
+    import asyncio
+
+    from energypilot import setupcheck
+
+    class FakeHA:
+        available = True
+
+        async def states(self):
+            unit = {"sensor.pv": "W", "sensor.haus": "W", "sensor.netz": "W", "sensor.soc": "%"}
+            return [{"entity_id": e, "state": "100", "attributes": {"unit_of_measurement": u, "state_class": "measurement"}}
+                    for e, u in unit.items()]
+
+        async def statistics_metadata(self, ids):
+            return {i: {"unit_class": "power"} for i in ids}
+
+    settings = Settings(tmp_path / "s.json")
+    arr = settings.upsert_array({"name": "Dach", "planes": [{"kwp": 2}], "sensor": "sensor.pv"})
+    settings.update({"location": {"latitude": 52, "longitude": 9},
+                     "sensors": {"house": "sensor.haus", "grid": "sensor.netz", "battery_soc": "sensor.soc",
+                                 "ev": "sensor.gibt_es_nicht"},
+                     "tariff": {"markup_ct": 0}})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), FakeHA())
+    now = int(time.time()) // 3600 * 3600
+    rows = []
+    for h in range(1, 11):  # 5 kWh PV per hour on a 2 kWp array, big surplus, grid shows import
+        t = now - h * 3600
+        rows += [(arr["id"], t, 5000.0), ("house", t, 300.0), ("grid", t, 2000.0)]
+    hub.db.put_actual(rows)
+    res = asyncio.run(setupcheck.run(hub))
+    titles = {c["title"]: c["level"] for g in res["groups"] for c in g["checks"]}
+    assert titles["Dach: Messung über der Anlagenleistung"] == "err"
+    assert titles["Vorzeichen der Netzleistung vermutlich falsch"] == "err"
+    assert titles["Kein Aufschlag eingetragen"] == "warn"
+    assert titles["E-Auto / Wallbox: Entität nicht gefunden"] == "err"
+    assert res["summary"]["err"] >= 3

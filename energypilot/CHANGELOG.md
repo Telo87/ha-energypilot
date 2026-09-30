@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+- Neu: **Einrichtung** (unter Verwaltung) – prüft, ob alle Einstellungen vorhanden, erreichbar und plausibel sind: Verbindung und Standort; PV-Anlagen (Sensor vorhanden, Einheit, Langzeitstatistik, aktuelle Werte, gemessene Höchstleistung passend zur kWp-Angabe); Sensoren inklusive **Vorzeichen-Prüfung** (bei großem PV-Überschuss muss eingespeist bzw. der Akku geladen werden) und Lücken bei E-Auto/Heizstab; Strompreis (Preise vorhanden, Aufschlag, MwSt, Einspeisevergütung plausibel); Batterie (Kapazität, Leistungen, Reserve, Wirkungsgrad); Prognosequellen, eigene Prognose, Verbrauchsprognose und Plan
+- Jeder Punkt mit „Beheben“-Link zur passenden Einstellung; Anzahl der Probleme im Menü und als Hinweis auf der Übersicht
+- Protokoll und Planung: „mit/ohne Plan“ heißt jetzt „mit/ohne EnergyPilot“
+
 ## 0.5.0
 
 - Neu: **Kosten** – Stromkosten pro Tag und Monat aus dem gemessenen Netzbezug und dem Preis der jeweiligen Stunde, plus anteilige Grundgebühr, abzüglich Einspeisevergütung; rückwirkend für den ganzen Rückblick-Zeitraum

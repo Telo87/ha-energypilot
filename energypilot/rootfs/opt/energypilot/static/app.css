@@ -667,3 +667,11 @@ svg.i.flip { transform: scaleX(-1); }
 .calib-head { font-size: 11.5px; color: var(--text-3); font-weight: 600; margin-bottom: 4px; }
 .calib-row { margin-bottom: 8px; }
 @media (max-width: 560px) { .calib-head { display: none; } .calib-row { grid-template-columns: 1fr 1fr 34px; } .calib-row [data-k=price] { grid-column: 1 / 3; } }
+
+/* setup check */
+.check-item { align-items: flex-start; }
+.check-item .avatar svg { width: 16px; height: 16px; }
+.check-item .btn { align-self: center; }
+a.notice.setup-hint { margin-bottom: 16px; color: var(--text); text-decoration: none; background: var(--err-soft); }
+a.notice.setup-hint svg { color: var(--err); }
+a.notice.setup-hint:hover { filter: brightness(.97); }
