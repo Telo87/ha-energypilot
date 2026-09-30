@@ -275,3 +275,15 @@ def test_nowcast_leaves_the_load_forecast_alone(tmp_path):
     hub.write_nowcast()
     rows = {(src, arr) for src, arr, _t, _wh in hub.db.forecasts(hour, hour + 7200, "d0")}
     assert ("nc", aid) in rows and ("nc", "base") not in rows
+
+
+def test_battery_range_only_while_discharging(tmp_path):
+    hub = Hub(Options(), Settings(tmp_path / "s.json"), Database(tmp_path / "x.db"), HomeAssistant())
+    hours = [{"t": 3600 * h, "frac": 1.0, "pv": 0.0, "load": 1.0} for h in range(4)]
+    usable = 5.5 - 1.1
+    rt = hub.battery_runtime(5.5, hours, 3420, now=0, battery_w=2000)  # charging
+    assert rt["state"] == "charging" and rt["now_hours"] is None
+    rt = hub.battery_runtime(5.5, hours, 3420, now=0, battery_w=10)
+    assert rt["state"] == "idle" and rt["now_hours"] is None
+    rt = hub.battery_runtime(5.5, hours, 3420, now=0, battery_w=-2200)  # PV covers part of the house
+    assert rt["state"] == "discharging" and rt["now_hours"] == pytest.approx(usable / 2.2, abs=0.01)

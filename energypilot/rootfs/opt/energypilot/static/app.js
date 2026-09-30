@@ -226,7 +226,8 @@
     const opts = arrays.length > 1 ? [['_total', 'Alle Anlagen'], ...arrays.map((a) => [a.id, a.name])] : arrays.length ? [['_total', arrays[0].name]] : [];
     if (S.settings && S.settings.sensors.house) opts.push([BASE, 'Grundverbrauch']);
     if (opts.length < 2) return '';
-    return `<div class="seg" id="${id}" role="group" aria-label="Auswahl">${opts.map(([v, l]) => `<button type="button" data-v="${esc(v)}" class="${cur === v ? 'active' : ''}">${ic(v === BASE ? 'home' : 'solar')}${esc(l)}</button>`).join('')}</div>`;
+    // its own bar above the other controls: it switches the whole page (production or consumption)
+    return `<div class="view-switch"><span class="vs-label">Auswertung für</span><div class="seg big" id="${id}" role="tablist">${opts.map(([v, l]) => `<button type="button" role="tab" aria-selected="${cur === v}" data-v="${esc(v)}" class="${cur === v ? 'active' : ''}">${ic(v === BASE ? 'home' : 'solar')}${esc(l)}</button>`).join('')}</div></div>`;
   }
   const CLASS_LABEL = { sunny: ['Sonnig', 'sun'], mixed: ['Wechselhaft', 'cloudSun'], cloudy: ['Trüb', 'cloud'] };
   const HORIZONS = [['d1', 'Vortag', 'Prognose vom Vortag (vor Mitternacht) – die Grundlage für die Planung des nächsten Tages'], ['d0', 'Kurzfristig', 'Letzte Prognose vor der jeweiligen Stunde']];
@@ -622,7 +623,9 @@
         : `<div class="notice">${ic('alert')}<div>${esc(p.reason)}</div></div>`}
         <div class="grid kpis">
           ${kpi('battery', 'ok', 'Akku jetzt', `${cnt('psoc', nf(p.soc, 0))}<small>%</small>`, `${nf(rt.usable_kwh, 1)} kWh nutzbar bis zur Reserve von ${nf(p.battery.min_soc, 0)} %`)}
-          ${kpi('clock', 'warn', 'Reichweite', rt.now_hours != null ? esc(fmtDur(rt.now_hours)) : '–', house ? `beim aktuellen Verbrauch von ${fmtW(house)}` : 'Hausverbrauch-Sensor fehlt')}
+          ${rt.state === 'charging' ? kpi('clock', 'ok', 'Akku lädt', `<span class="kpi-text">mit ${esc(fmtW(rt.battery_w))}</span>`, rt.full_at ? `voll voraussichtlich ${fmtWhen(rt.full_at)}` : 'Reichweite wird angezeigt, sobald er entlädt')
+            : rt.state === 'idle' ? kpi('clock', '', p.soc >= 99 ? 'Akku voll' : 'Akku ruht', '<span class="kpi-text">entlädt nicht</span>', 'der Verbrauch wird gerade aus PV oder Netz gedeckt')
+              : kpi('clock', 'warn', 'Reichweite', rt.now_hours != null ? esc(fmtDur(rt.now_hours)) : '–', rt.state === 'discharging' ? `bei der aktuellen Entladeleistung von ${fmtW(-rt.battery_w)}` : house ? `beim aktuellen Verbrauch von ${fmtW(house)}` : 'Hausverbrauch-Sensor fehlt')}
           ${kpi('sun', 'up', 'Akku leer (Prognose)', `<span class="kpi-text">${rt.empty_at ? esc(fmtWhen(rt.empty_at)) : `nicht vor ${esc(fmtWhen(rt.until, true))}`}</span>`, rt.empty_at ? (rt.full_at && rt.full_at > rt.empty_at ? `wieder voll ${fmtWhen(rt.full_at)}` : 'mit PV-Erzeugung und Verbrauchsprognose') : rt.full_at ? `voll ${fmtWhen(rt.full_at)} · reicht bis ${fmtWhen(rt.until, true)}` : `bis ${fmtWhen(rt.until, true)}`)}
           ${kpi('home', '', 'Verbrauch (Prognose)', `${nf(loadSum(0, tomorrowTs), 1)}<small>kWh</small>`, `bis Mitternacht · morgen ${nf(loadSum(tomorrowTs, afterTs), 1)} kWh · ohne E-Auto/Heizstab`)}
           ${p.ok ? kpi('euro', p.savings_eur > 0.005 ? 'ok' : '', 'Ersparnis durch EnergyPilot', `${cnt('sav', nf(Math.max(0, p.savings_eur), 2))}<small>€</small>`, `Stromkosten ${nf(p.cost_eur, 2)} € statt ${nf(p.baseline_eur, 2)} € ohne EnergyPilot bis ${fmtWhen(p.horizon_end, true)}`) : ''}
@@ -758,10 +761,9 @@
       if (stale(token)) return;
       draw(data);
     };
-    const toolbar = () => `<div class="toolbar">
-        <div class="seg" id="accDays">${[[7, '7 Tage'], [14, '14 Tage'], [30, '30 Tage'], [90, '90 Tage'], [365, '1 Jahr']].map(([d, l]) => `<button data-v="${d}" class="${cfg.days === d ? 'active' : ''}">${l}</button>`).join('')}</div>
-        <div class="seg" id="accHz">${HORIZONS.map(([k, l, t]) => `<button data-v="${k}" title="${esc(t)}" class="${cfg.horizon === k ? 'active' : ''}">${l}</button>`).join('')}</div>
-        ${seriesSelect('accSeries', cfg.series, arrays)}
+    const toolbar = () => `${seriesSelect('accSeries', cfg.series, arrays)}<div class="toolbar">
+        <span class="tb-label">Zeitraum</span><div class="seg" id="accDays">${[[7, '7 Tage'], [14, '14 Tage'], [30, '30 Tage'], [90, '90 Tage'], [365, '1 Jahr']].map(([d, l]) => `<button data-v="${d}" class="${cfg.days === d ? 'active' : ''}">${l}</button>`).join('')}</div>
+        <span class="tb-label">Prognose</span><div class="seg" id="accHz">${HORIZONS.map(([k, l, t]) => `<button data-v="${k}" title="${esc(t)}" class="${cfg.horizon === k ? 'active' : ''}">${l}</button>`).join('')}</div>
         <label class="check" title="Nur Stunden vergleichen, für die alle Quellen einen Wert haben – fairer, wenn Quellen unterschiedlich lange gesammelt wurden"><input type="checkbox" id="accCommon" ${cfg.common ? 'checked' : ''}>Nur gemeinsame Stunden</label>
       </div>`;
     const draw = (d) => {
@@ -873,10 +875,9 @@
       const devTxt = (r) => (r.dev == null ? (r.partial ? `nur ${r.hrs} ${r.hrs === 1 ? 'Stunde' : 'Stunden'} berechnet` : '&nbsp;')
         : `<span class="${r.dev.v > 0 ? 'pos' : 'neg'}">${r.dev.u === '%' ? `${signed(r.dev.v)} %` : `${signed(r.dev.v, 2)} kWh`}</span> zur Messung${r.partial ? ` · nur ${r.hrs} ${r.hrs === 1 ? 'Stunde' : 'Stunden'} berechnet` : ''}`);
       const today = localDay();
-      el.innerHTML = `<div class="toolbar">
-          <div class="day-nav"><button class="icon-btn" id="dPrev" title="Vorheriger Tag">${ic('chevronL')}</button><input class="input" type="date" id="dPick" value="${day}"><button class="icon-btn" id="dNext" title="Nächster Tag">${ic('chevron')}</button>${day !== today ? `<button class="btn sm" id="dToday">Heute</button>` : ''}</div>
-          <div class="seg" id="dHz">${HORIZONS.map(([k, l, t]) => `<button data-v="${k}" title="${esc(t)}" class="${cfg.horizon === k ? 'active' : ''}">${l}</button>`).join('')}</div>
-          ${seriesSelect('dSeries', cfg.series, arrays)}
+      el.innerHTML = `${seriesSelect('dSeries', cfg.series, arrays)}<div class="toolbar">
+          <span class="tb-label">Tag</span><div class="day-nav"><button class="icon-btn" id="dPrev" title="Vorheriger Tag">${ic('chevronL')}</button><input class="input" type="date" id="dPick" value="${day}"><button class="icon-btn" id="dNext" title="Nächster Tag">${ic('chevron')}</button>${day !== today ? `<button class="btn sm" id="dToday">Heute</button>` : ''}</div>
+          <span class="tb-label">Prognose</span><div class="seg" id="dHz">${HORIZONS.map(([k, l, t]) => `<button data-v="${k}" title="${esc(t)}" class="${cfg.horizon === k ? 'active' : ''}">${l}</button>`).join('')}</div>
         </div>
         <div class="grid dash">
           <div class="card"><div class="card-head"><h2>${cfg.series === BASE ? 'Grundverbrauch <span class="sub">stündlich, ohne E-Auto und Heizstab</span>' : 'PV-Erzeugung <span class="sub">stündlich</span>'}</h2></div>

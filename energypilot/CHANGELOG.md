@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.8
+
+- Tagesverlauf und Prognose-Check: Die Umschaltung „Auswertung für“ (Anlagen / Grundverbrauch) steht als eigene, hervorgehobene Leiste über den Filtern; Tag, Zeitraum und Prognose sind beschriftet
+- Planung: Die Reichweite erscheint nur noch, wenn der Akku entlädt – und wird mit seiner tatsächlichen Entladeleistung berechnet statt mit dem ganzen Hausverbrauch. Lädt der Akku, steht dort „Akku lädt“ mit Leistung und voraussichtlicher Uhrzeit für „voll“; ruht er, „Akku ruht“ bzw. „Akku voll“. Der Sensor `sensor.energypilot_akku_reichweite` ist dann „unbekannt“ und hat das neue Attribut `battery_state`
+
 ## 0.5.7
 
 - Tagesverlauf und Prognose-Check: Die Auswahl „Alle Anlagen / einzelne Anlage / Grundverbrauch“ ist jetzt eine Reihe von Schaltflächen statt einer Aufklappliste

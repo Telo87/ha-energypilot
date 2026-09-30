@@ -789,14 +789,21 @@ class Hub:
             per[datetime.fromtimestamp(t, self.tz).hour].append(max(0.0, wh))
         return {h: sum(v) / len(v) for h, v in per.items() if v}
 
-    def battery_runtime(self, soc_kwh: float, hours: list[dict], house_w: float | None, now: float) -> dict:
+    def battery_runtime(
+        self, soc_kwh: float, hours: list[dict], house_w: float | None, now: float, battery_w: float | None = None
+    ) -> dict:
         """How long the battery lasts: at today's consumption and along the forecast."""
         b = self.battery()
         lo = b.capacity_kwh * b.min_soc / 100
         usable = max(0.0, soc_kwh - lo)
         out = {"usable_kwh": round(usable, 2), "now_hours": None, "empty_at": None, "full_at": None,
-               "until": hours[-1]["t"] + 3600 if hours else None}
-        if house_w and house_w > 50:
+               "until": hours[-1]["t"] + 3600 if hours else None, "state": None, "battery_w": battery_w}
+        if battery_w is not None:
+            # a range only makes sense while the battery discharges - and then at its own discharge power
+            out["state"] = "discharging" if battery_w < -50 else "charging" if battery_w > 50 else "idle"
+            if out["state"] == "discharging":
+                out["now_hours"] = round(usable / (-battery_w / 1000), 2)
+        elif house_w and house_w > 50:  # no battery power sensor: whole house consumption from the battery
             out["now_hours"] = round(usable / (house_w / 1000), 2)
         soc = soc_kwh
         eta = b.eta
@@ -830,7 +837,8 @@ class Hub:
         soc_kwh = b.capacity_kwh * float(soc_val) / 100
         energy, best, load_src = self.energy_hours(now)
         house = (self.live.get("values", {}).get("house") or {}).get("value")
-        runtime = self.battery_runtime(soc_kwh, energy, house, now)
+        bat_w = (self.live.get("values", {}).get("battery_power") or {}).get("value")
+        runtime = self.battery_runtime(soc_kwh, energy, house, now, bat_w)
         prices_h: dict[int, list[float]] = defaultdict(list)
         for slot in self.price_slots(int(now) // 3600 * 3600, energy[-1]["t"] + 3600 if energy else int(now)):
             prices_h[slot["ts"] // 3600 * 3600].append(slot["price"])
@@ -1042,6 +1050,7 @@ class Hub:
                     "unit_of_measurement": "h",
                     "icon": "mdi:battery-clock-outline",
                     "usable_kwh": rt.get("usable_kwh"),
+                    "battery_state": rt.get("state"),  # the range is only set while discharging
                     "empty_at": datetime.fromtimestamp(rt["empty_at"], tz).isoformat() if rt.get("empty_at") else None,
                     "full_at": datetime.fromtimestamp(rt["full_at"], tz).isoformat() if rt.get("full_at") else None,
                 },

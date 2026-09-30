@@ -703,3 +703,13 @@ a.notice.setup-hint:hover { filter: brightness(.97); }
 
 .list-item.faded .title, .list-item.faded .num { color: var(--text-3); }
 .rank.none { background: none; }
+
+/* switch between production and consumption: its own bar, clearly above the filters */
+.view-switch { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; padding: 10px 12px 10px 16px; margin-bottom: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.view-switch .vs-label { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--text-3); }
+.seg.big { background: var(--surface-2); }
+.seg.big button { padding: 7px 14px; font-size: 13.5px; }
+.seg.big button.active { background: var(--accent); color: #fff; box-shadow: none; }
+.seg.big button:not(.active):hover { background: var(--surface-3); color: var(--text); }
+.tb-label { font-size: 12px; font-weight: 600; color: var(--text-3); margin-right: -4px; }
+.tb-label:not(:first-child) { margin-left: 8px; }
