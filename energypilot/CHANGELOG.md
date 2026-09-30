@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.3
+
+- Menü: Bei „Einrichtung“ steht die Anzahl der Probleme (rot) bzw. – wenn es keine gibt – der Hinweise (orange). Die Prüfung läuft beim Öffnen und alle 10 Minuten, der Hinweis ist also auf jeder Seite sichtbar
+- Behoben (Einrichtung): Wechselrichter, die ohne Sonne abschalten und dann „unavailable“ melden, galten als Fehler. Ist gerade zu wenig Licht auf den Modulen, ist das jetzt „in Ordnung – Wechselrichter aus“. Auch „Messwerte veraltet“ zählt nur noch fehlende Stunden mit Tageslicht
+- Behoben (Einrichtung): Ein nicht verfügbarer Sensor erschien zusätzlich als „in Ordnung“ mit „aktuell unavailable W“
+- Übersicht: Schlafen die Wechselrichter, zeigt „PV-Erzeugung“ 0 W und „Wechselrichter aus – keine Sonne“ statt „Sensor in den Einstellungen wählen“
+
 ## 0.7.2
 
 - Behoben (Protokoll): Fehlten zwischendurch Empfehlungen (Neustart oder Update des Add-ons), rechnete die Nachrechnung über die Lücke hinweg mit einem erfundenen Akkustand weiter – z. B. mit einem halb leeren Akku, der in Wirklichkeit längst voll war. Jetzt beginnt jeder zusammenhängende Abschnitt mit dem gemessenen Ladezustand; die Tagesansicht nennt die Anzahl der Abschnitte. An echten Daten stimmt die Nachrechnung damit fast genau mit der Messung überein (Einspeisung 5,3 statt 0,8 kWh, gemessen 5,4 kWh)

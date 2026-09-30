@@ -91,7 +91,7 @@ async def run(hub: Hub) -> dict:
     else:
         conn.append(_c("err", "Standort unbekannt", "Ohne Standort gibt es keine Wetterprognosen – in Home Assistant setzen oder hier eintragen.", LINK["sensors"]))
 
-    def sensor_state(entity: str, kinds: tuple[str, ...], label: str, link: str, required: bool) -> tuple[list[dict], dict | None]:
+    def sensor_state(entity: str, kinds: tuple[str, ...], label: str, link: str, required: bool, asleep: bool = False) -> tuple[list[dict], dict | None]:
         """existence, availability, unit and statistics of a chosen sensor"""
         out = []
         if not entity:
@@ -106,7 +106,11 @@ async def run(hub: Hub) -> dict:
             return out, None
         attrs = st.get("attributes") or {}
         unit = attrs.get("unit_of_measurement")
-        if st.get("state") in ("unavailable", "unknown", None):
+        down = st.get("state") in ("unavailable", "unknown", None)
+        if down and asleep:  # inverter switched off for the night - normal
+            out.append(_c("ok", f"{label}", f"{entity} · Wechselrichter aus, weil gerade keine Sonne auf den Modulen ist"))
+            return out, st
+        if down:
             out.append(_c("warn", f"{label}: gerade nicht verfügbar", f"{entity} meldet „{st.get('state')}“.", link))
         kind = "power" if unit in POWER_UNITS else "energy" if unit in ENERGY_UNITS else "percent" if unit == "%" else None
         if kind not in kinds:
@@ -114,7 +118,7 @@ async def run(hub: Hub) -> dict:
             out.append(_c("err", f"{label}: falsche Einheit", f"{entity} hat die Einheit „{unit or 'keine'}“, erwartet wird {need}.", link))
         elif kind in ("power", "energy") and meta is not None and states and entity not in meta and not hub.options.demo:
             out.append(_c("warn", f"{label}: keine Langzeitstatistik", f"{entity} hat keine state_class – ohne Statistik kann EnergyPilot keine Verläufe auswerten.", link))
-        else:
+        elif not down:  # an unavailable sensor already has its warning above
             out.append(_c("ok", f"{label}", f"{entity} · aktuell {st.get('state')} {unit or ''}".strip()))
         return out, st
 
@@ -132,7 +136,8 @@ async def run(hub: Hub) -> dict:
         if a["kwp"] <= 0 or not a["planes"]:
             pv.append(_c("err", f"{name}: keine Leistung eingetragen", "Mindestens eine Teilfläche mit kWp angeben.", LINK["arrays"]))
             continue
-        checks, _st = sensor_state(a.get("sensor", ""), ("power", "energy"), f"{name}: Messsensor", LINK["arrays"], False)
+        checks, _st = sensor_state(a.get("sensor", ""), ("power", "energy"), f"{name}: Messsensor", LINK["arrays"], False,
+                                   asleep=not hub.daylight(now, a))
         if not a.get("sensor"):
             pv.append(_c("warn", f"{name}: kein Messsensor", "Ohne Messwerte kann die Prognose weder geprüft noch dazulernen.", LINK["arrays"]))
             continue
@@ -142,7 +147,9 @@ async def run(hub: Hub) -> dict:
             pv.append(_c("warn", f"{name}: noch keine Messwerte", "In den letzten 30 Tagen sind keine Stundenwerte angekommen – Sensor und Statistik prüfen.", LINK["arrays"]))
             continue
         last = max(series)
-        if now - last > 6 * 3600:
+        # statistics have no values while the inverter sleeps: only missing daylight hours count
+        missing = sum(1 for t in range(last + 3600, now // 3600 * 3600, 3600) if hub.daylight(t, a))
+        if missing >= 3:
             pv.append(_c("warn", f"{name}: Messwerte veraltet", f"Letzter Stundenwert von {datetime.fromtimestamp(last, hub.tz):%d.%m. %H:%M}.", LINK["arrays"]))
         peak = max(series.values())
         limit = min(a["kwp"], a["ac_max_kw"]) if a.get("ac_max_kw") else a["kwp"]

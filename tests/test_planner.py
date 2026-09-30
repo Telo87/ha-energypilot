@@ -425,3 +425,37 @@ def test_journal_restarts_the_battery_after_a_gap(tmp_path):
     assert day["segments"] == 2
     # the full battery after the gap cannot take the surplus: it is fed in, like measured
     assert day["bills"]["base"]["export_kwh"] == pytest.approx(6.0, abs=0.01)
+
+
+def test_setup_check_accepts_sleeping_inverters(tmp_path):
+    import asyncio
+
+    from energypilot import setupcheck
+
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"location": {"latitude": 52, "longitude": 9}})
+    settings.upsert_array({"name": "Dach", "planes": [{"kwp": 5}], "sensor": "sensor.pv"})
+
+    class FakeHA(HomeAssistant):
+        available = True
+
+        async def states(self):
+            return [{"entity_id": "sensor.pv", "state": "unavailable", "attributes": {"unit_of_measurement": "W"}}]
+
+        async def statistics_metadata(self, ids):
+            return {i: {"unit_class": "power"} for i in ids}
+
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), FakeHA())
+    cfg = hub.settings.arrays[0]
+    night = hub.midnight(int(time.time())) + 2 * 3600
+    noon = hub.midnight(int(time.time())) + 12 * 3600
+    assert not hub.daylight(night, cfg) and hub.daylight(noon, cfg)
+    real_time = time.time
+    try:
+        time.time = lambda: night + 600  # 2 o'clock: the inverter sleeps
+        rep = asyncio.run(setupcheck.run(hub))
+    finally:
+        time.time = real_time
+    pv = next(g for g in rep["groups"] if g["key"] == "arrays")["checks"]
+    assert not any(c["level"] == "warn" and "nicht verfügbar" in c["title"] for c in pv)
+    assert any("keine Sonne" in c["text"] for c in pv)

@@ -484,6 +484,17 @@ class Hub:
             return None
         return imp or 0.0, exp or 0.0
 
+    def daylight(self, t: int, cfg: dict) -> bool:
+        """Is there enough light on this array in the hour starting at ``t`` for the inverter to run?
+
+        Inverters switch off at night and in the first / last minutes of the day; their
+        sensors are then "unavailable" - that is normal, not a fault."""
+        loc = self.location
+        if not loc or cfg["kwp"] <= 0:
+            return True
+        clear = analysis._clear(t // 3600 * 3600, to_array(cfg), round(loc[0], 3), round(loc[1], 3))
+        return clear > 20 * cfg["kwp"]  # less than ~2 % of the peak: too dark to start
+
     def feed_in_avg(self) -> float:
         """Feed-in payment in ct/kWh, weighted by the arrays' kWp (arrays can have their own)."""
         default = float(self.settings.data["tariff"].get("feed_in_ct", 0))
@@ -1567,6 +1578,8 @@ class Hub:
             "location": self.location,
             "arrays": cfgs,
             "live": self.live,
+            # arrays that are asleep now (no light) - their "unavailable" sensor is normal
+            "asleep": [c["id"] for c in cfgs if not self.daylight(int(now), c)],
             "price": self.current_price(now),
             "prices": self.price_slots(today, tomorrow + 90000),
             "forecasts": forecasts,

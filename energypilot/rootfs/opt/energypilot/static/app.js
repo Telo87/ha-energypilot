@@ -391,10 +391,17 @@
     { id: 'setup', title: 'Einrichtung', icon: 'checkCircle', section: 'Verwaltung' },
     { id: 'settings', title: 'Einstellungen', icon: 'gear' },
   ];
+  // small number in the menu: problems (red), otherwise notes that need a look (orange)
+  function setupBadge() {
+    const sm = (S.check && S.check.summary) || {};
+    if (sm.err) return `<span class="badge count" title="${sm.err} ${sm.err === 1 ? 'Problem' : 'Probleme'}">${sm.err}</span>`;
+    if (sm.warn) return `<span class="badge count warn" title="${sm.warn} ${sm.warn === 1 ? 'Hinweis' : 'Hinweise'}">${sm.warn}</span>`;
+    return '';
+  }
   function renderNav() {
     const cur = currentPage();
     $('#nav').innerHTML = PAGES.map((p) => `${p.section ? `<div class="nav-section">${p.section}</div>` : ''}
-      <a href="#/${p.id}" class="${p.id === cur ? 'active' : ''}">${ic(p.icon)}<span>${p.title}</span>${p.id === 'setup' && S.check && S.check.summary.err ? `<span class="badge count">${S.check.summary.err}</span>` : ''}</a>`).join('');
+      <a href="#/${p.id}" class="${p.id === cur ? 'active' : ''}">${ic(p.icon)}<span>${p.title}</span>${p.id === 'setup' ? setupBadge() : ''}</a>`).join('');
   }
   function currentPage() {
     const id = (location.hash.replace(/^#\/?/, '').split('?')[0]) || 'dashboard';
@@ -487,8 +494,12 @@
       bindRefresh(() => { lastDayLoad = 0; load(); });
       const lv = ov.live.values || {};
       const pvKeys = ov.arrays.map((a) => `pv:${a.id}`);
-      const pvVals = pvKeys.map((k) => lv[k] && lv[k].unit === 'W' ? lv[k].value : null).filter((v) => v != null);
+      const asleep = new Set(ov.asleep || []);
+      // an inverter without light is switched off: its sensor is "unavailable", the production is 0
+      const pvW = (a) => { const x = lv[`pv:${a.id}`]; return x && x.unit === 'W' && x.value != null ? x.value : asleep.has(a.id) && a.sensor ? 0 : null; };
+      const pvVals = ov.arrays.map(pvW).filter((v) => v != null);
       const pvNow = pvVals.length ? pvVals.reduce((a, b) => a + b, 0) : null;
+      const allAsleep = ov.arrays.length > 0 && ov.arrays.every((a) => asleep.has(a.id));
       const val = (k) => (lv[k] ? lv[k].value : null);
       const grid = val('grid'); const soc = val('battery_soc'); const bp = val('battery_power');
       const best = ov.forecasts.find((f) => f.source === ov.best) || ov.forecasts.find((f) => f.source === 'om:best_match');
@@ -511,7 +522,7 @@
           <div class="row wrap" style="gap:8px"><span class="badge ${plan.buy_now ? 'accent' : ''}">Strom kaufen: ${plan.buy_now ? 'ja' : 'nein'}</span><a class="btn sm" href="#/plan">${ic('battery')}Zur Planung</a></div></div>`
         : `<div class="now-decision"><div class="now-kicker">Empfehlung jetzt</div><div class="now-title">Noch kein Plan</div><p class="muted">${esc((plan && plan.reason) || 'Wird berechnet …')}</p></div>`;
       const flows = [
-        flowNode('solar', 'warn', 'PV-Erzeugung', wv('pv', pvNow), pvVals.length ? `${ov.arrays.map((a) => { const x = lv[`pv:${a.id}`]; return `${esc(a.name)} ${x && x.unit === 'W' ? fmtW(x.value) : x && x.value != null ? 'Zähler' : '–'}`; }).join(' · ')}${nowcastText(plan)}` : missing()),
+        flowNode('solar', 'warn', 'PV-Erzeugung', wv('pv', pvNow), pvVals.length ? `${allAsleep && !pvVals.some((v) => v > 0) ? 'Wechselrichter aus – keine Sonne' : ov.arrays.map((a) => { const x = lv[`pv:${a.id}`]; const w = pvW(a); return `${esc(a.name)} ${w != null ? fmtW(w) : x && x.value != null ? 'Zähler' : '–'}`; }).join(' · ')}${nowcastText(plan)}` : missing()),
         flowNode('home', '', 'Hausverbrauch', wv('house', val('house')), lv.house ? (ov.load ? `Grundverbrauch heute ~${nf(ov.load.today, 1)} kWh` : 'aktuell') : missing()),
         flowNode('battery', 'ok', 'Akku', soc == null ? '–' : `${cnt('soc', nf(soc, 0))}<small>%</small>`, `${bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'}${rt && (rt.empty_at || rt.until) ? ` · Prognose: ${rt.empty_at ? `leer ${fmtWhen(rt.empty_at).replace(' ', ' um ')}` : `reicht über ${fmtWhen(rt.until, true)} hinaus`}` : ''}`),
         // like the battery card: the title names the device, the line below says which way the power flows
@@ -1789,6 +1800,8 @@
     $('#scrim').addEventListener('click', () => $('#app').classList.remove('nav-open'));
     window.addEventListener('scroll', () => $('.topbar').classList.toggle('scrolled', window.scrollY > 4), { passive: true });
     window.addEventListener('hashchange', navigate);
+    loadCheck().catch(() => {});
+    setInterval(() => { if (!document.hidden) loadCheck(true).catch(() => {}); }, 10 * 60000);
     document.addEventListener('click', (e) => {
       if (!e.target.closest('[data-legend-more]')) return;
       store.set('legendAll', !store.get('legendAll', false));
