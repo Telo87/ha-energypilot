@@ -209,7 +209,8 @@ async def run(hub: Hub) -> dict:
     live = hub.live.get("values", {})
     bp = (live.get("battery_power") or {}).get("value")
     soc = (live.get("battery_soc") or {}).get("value")
-    pv_now = [(live.get(f"pv:{i}") or {}).get("value") for i in ids]
+    # power sensors only - an energy counter's reading is a total, not the current production
+    pv_now = [(live.get(f"pv:{i}") or {}).get("value") if (live.get(f"pv:{i}") or {}).get("unit") == "W" else None for i in ids]
     house_now = (live.get("house") or {}).get("value")
     if bp is not None and soc is not None and ids and all(v is not None for v in pv_now) and house_now is not None:
         surplus_now = sum(pv_now) - abs(house_now)

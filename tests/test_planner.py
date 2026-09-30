@@ -212,3 +212,55 @@ def test_journal_counts_night_hours_without_pv_values(tmp_path):
     assert day["complete_hours"] == 4
     assert day["pv"] == 0 and day["load"] == 2.0 and day["load_fc"] == 2.0
     assert day["cost_base"] == 0  # battery covers the night: nothing bought, no credit for the energy left
+
+
+def _hub_with_array(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"location": {"latitude": 52, "longitude": 9}})
+    settings.upsert_array({"name": "Dach", "planes": [{"kwp": 5}], "sensor": "sensor.pv"})
+    return Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+
+
+def test_day_view_counts_dark_hours_as_zero(tmp_path):
+    hub = _hub_with_array(tmp_path)
+    day = hub.day_key(time.time() - 86400)
+    d = hub.day_view(day, "_total")
+    assert d["actual"][2] == 0  # 2 o'clock yesterday: no sensor value, sun down
+    assert d["actual"][12] is None  # noon without value stays unknown
+
+
+def test_nowcast_ignores_energy_counters(tmp_path):
+    hub = _hub_with_array(tmp_path)
+    aid = hub.settings.arrays[0]["id"]
+    hub.live = {"values": {f"pv:{aid}": {"value": 12345.0, "unit": "kWh"}}}
+    hub.sample_pv()
+    assert not hub._pv_samples
+    hub.live = {"values": {f"pv:{aid}": {"value": 1500.0, "unit": "W"}}}
+    hub.sample_pv()
+    assert len(hub._pv_samples) == 1
+
+
+def test_nowcast_only_corrects_its_own_source(tmp_path):
+    hub = _hub_with_array(tmp_path)
+    aid = hub.settings.arrays[0]["id"]
+    now = time.time()
+    hour = int(now) // 3600 * 3600
+    hub.db.put_forecast([("om:best_match", aid, hour + i * 3600, "d0", 1000.0, 0) for i in range(3)])
+    hub.nowcast = {"factor": 1.5, "source": "ep"}  # measured against a source the plan does not use
+    out, _best, _src = hub.energy_hours(now)
+    assert out[1]["pv"] == 1.0
+    hub.nowcast = {"factor": 1.5, "source": "om:best_match"}
+    out, _best, _src = hub.energy_hours(now)
+    assert out[1]["pv"] == pytest.approx(1.0 * (1 + 0.5 * 0.2))
+
+
+def test_market_average_only_past_quarter_hours(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"sensors": {"grid": "sensor.grid"}})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    hour = int(time.time()) // 3600 * 3600 - 3600
+    hub.db.put_actual([("grid", hour, 1000.0)])
+    hub.db.put_prices([(hour + q * 900, 900, 100.0) for q in range(4)])  # last hour: 10 ct net
+    hub.db.put_prices([(hour + 7200 + q * 900, 900, 900.0) for q in range(8)])  # known future: 90 ct net
+    res = hub.costs(hour, hour + 5 * 3600)
+    assert res["totals"]["avg_market_ct"] == res["totals"]["avg_paid_ct"]

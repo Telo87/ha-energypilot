@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.5
+
+Durchsicht des ganzen Add-ons auf Fehler:
+
+- Behoben (Tagesverlauf): Die Tagessumme verglich die Prognose für den ganzen Tag mit den bisher gemessenen Stunden – daraus wurden Abweichungen von mehreren tausend Prozent. Jetzt zählen für die Abweichung nur die schon gemessenen Stunden; kleine Mengen am Morgen werden in kWh statt in Prozent angegeben
+- Tagesverlauf: Die Tagessumme ist als Rangliste gekennzeichnet (Platz 1 = kleinste Abweichung); die live korrigierte Prognose, die nur für die jeweils nächsten Stunden berechnet wird, ist als „nur N Stunden berechnet“ markiert
+- Behoben (Tagesverlauf): Nachtstunden ohne Wert des Wechselrichters zählen als 0 – vergangene Tage galten sonst als unvollständig gemessen
+- Behoben (Live-Korrektur): Sie wurde an der eigenen Prognose gemessen, aber auf die Quelle angewendet, mit der der Plan rechnet. Beides ist jetzt dieselbe Quelle
+- Behoben (Live-Korrektur, Einrichtung): Ist als Messsensor ein Energiezähler (kWh) gewählt, wurde sein Zählerstand als Leistung gelesen. Live-Korrektur, Anzeige „PV-Erzeugung“ und die Prüfung des Batterie-Vorzeichens nutzen jetzt nur Leistungssensoren
+- Behoben (Kosten): Der Durchschnitt aller Viertelstunden enthielt schon bekannte, aber noch nicht vergangene Preise (Rest des Tages, morgen)
+- Behoben (Kosten): Ein Hausverbrauch-Sensor mit negativem Vorzeichen wird wie beim Grundverbrauch automatisch umgedreht – die Autarkie fehlte sonst
+- Behoben (Datenquellen): Schlug Forecast.Solar für eine Anlage fehl und klappte für die nächste, wurde der Fehler nicht angezeigt
+- Genauigkeit: Übersicht und Prognose-Check zeigen jetzt, wonach sortiert wird (Fehler je Stunde) und daneben den Fehler je Tag; „Summe“ heißt jetzt „Tendenz“
+- Übersicht: „Akku reicht über … hinaus“ nennt das tatsächliche Ende des Planungszeitraums
+
 ## 0.5.4
 
 - Menü neu gegliedert: „Heute“ (Übersicht, Planung, Strompreise), „Auswertung“ (Tagesverlauf, Prognose-Check, Protokoll, Kosten) und „Verwaltung“

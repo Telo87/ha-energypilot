@@ -486,7 +486,7 @@
       bindRefresh(() => { lastDayLoad = 0; load(); });
       const lv = ov.live.values || {};
       const pvKeys = ov.arrays.map((a) => `pv:${a.id}`);
-      const pvVals = pvKeys.map((k) => lv[k] && lv[k].value).filter((v) => v != null);
+      const pvVals = pvKeys.map((k) => lv[k] && lv[k].unit === 'W' ? lv[k].value : null).filter((v) => v != null);
       const pvNow = pvVals.length ? pvVals.reduce((a, b) => a + b, 0) : null;
       const val = (k) => (lv[k] ? lv[k].value : null);
       const grid = val('grid'); const soc = val('battery_soc'); const bp = val('battery_power');
@@ -510,9 +510,9 @@
           <div class="row wrap" style="gap:8px"><span class="badge ${plan.buy_now ? 'accent' : ''}">Strom kaufen: ${plan.buy_now ? 'ja' : 'nein'}</span><a class="btn sm" href="#/plan">${ic('battery')}Zur Planung</a></div></div>`
         : `<div class="now-decision"><div class="now-kicker">Empfehlung jetzt</div><div class="now-title">Noch kein Plan</div><p class="muted">${esc((plan && plan.reason) || 'Wird berechnet …')}</p></div>`;
       const flows = [
-        flowNode('solar', 'warn', 'PV-Erzeugung', wv('pv', pvNow), pvVals.length ? `${ov.arrays.map((a) => `${esc(a.name)} ${fmtW(val(`pv:${a.id}`))}`).join(' · ')}${nowcastText(plan)}` : missing()),
+        flowNode('solar', 'warn', 'PV-Erzeugung', wv('pv', pvNow), pvVals.length ? `${ov.arrays.map((a) => { const x = lv[`pv:${a.id}`]; return `${esc(a.name)} ${x && x.unit === 'W' ? fmtW(x.value) : x && x.value != null ? 'Zähler' : '–'}`; }).join(' · ')}${nowcastText(plan)}` : missing()),
         flowNode('home', '', 'Hausverbrauch', wv('house', val('house')), lv.house ? (ov.load ? `Grundverbrauch heute ~${nf(ov.load.today, 1)} kWh` : 'aktuell') : missing()),
-        flowNode('battery', 'ok', 'Akku', soc == null ? '–' : `${cnt('soc', nf(soc, 0))}<small>%</small>`, `${bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'}${rt ? ` · ${rt.empty_at ? `reicht bis ${fmtWhen(rt.empty_at)}` : 'reicht bis morgen Abend'}` : ''}`),
+        flowNode('battery', 'ok', 'Akku', soc == null ? '–' : `${cnt('soc', nf(soc, 0))}<small>%</small>`, `${bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'}${rt ? ` · ${rt.empty_at ? `reicht bis ${fmtWhen(rt.empty_at)}` : rt.until ? `reicht über ${fmtWhen(rt.until, true)} hinaus` : ''}` : ''}`),
         flowNode('plug', grid != null && grid < 0 ? 'ok' : '', grid != null && grid < 0 ? 'Einspeisung' : 'Netzbezug', wv('grid', grid == null ? null : Math.abs(grid)), lv.grid ? (grid > 20 ? 'Strom wird gekauft' : grid < -20 ? 'Überschuss geht ins Netz' : 'ausgeglichen') : missing()),
       ].join('');
       const nowCard = `<div class="card now-card"><div class="card-body now-grid">${decision}<div class="flow-grid">${flows}</div></div></div>`;
@@ -536,8 +536,8 @@
         <div class="grid dash">
           <div class="card"><div class="card-head"><h2>PV-Erzeugung &amp; Verbrauch – heute und morgen <span class="sub">stündlich · Prognose kurzfristig</span></h2></div>
             <div class="card-body">${legendHTML({ ...MEASURED, label: 'Gemessen', color: 'var(--measured)' }, lines, hidden)}<div class="chart tall" id="pvChart"></div></div></div>
-          <div class="card"><div class="card-head"><h2>Genauigkeit <span class="sub">letzte 30 Tage · Vortag</span></h2><a class="btn sm" href="#/accuracy">Details</a></div>
-            <div class="card-body flush"><div class="list">${acc.length ? acc.map((r, i) => `<div class="list-item"><span class="rank ${i === 0 ? 'r1' : ''}">${i + 1}</span><span class="swatch-dot" style="background:${srcColor(r.source)}"></span><div class="grow"><div class="title">${esc(r.label)}</div><div class="meta">Tagesabweichung Ø ${pct(r.day_nmae_pct)} · ${r.days} Tage</div></div><b class="num">${pct(r.score, 0)}</b></div>`).join('')
+          <div class="card"><div class="card-head"><h2>Genauigkeit <span class="sub">Rangliste · letzte 30 Tage · Prognose vom Vortag</span></h2><a class="btn sm" href="#/accuracy">Details</a></div>
+            <div class="card-body flush"><div class="list">${acc.length ? acc.map((r, i) => `<div class="list-item"><span class="rank ${i === 0 ? 'r1' : ''}">${i + 1}</span><span class="swatch-dot" style="background:${srcColor(r.source)}"></span><div class="grow"><div class="title">${esc(r.label)}</div><div class="meta">Fehler je Stunde Ø ${pct(r.nmae_pct, 0)} · je Tag Ø ${pct(r.day_nmae_pct, 0)} · ${r.days} Tage</div></div><b class="num" title="Genauigkeit = 100 % minus Fehler je Stunde">${pct(r.score, 0)}</b></div>`).join('')
               : `<div class="muted" style="padding:6px 18px 14px;font-size:13px">Sobald Messwerte und Prognosen für einige Tage vorliegen, erscheint hier die Rangliste der Prognosequellen.</div>`}</div></div></div>
         </div>
         <div class="grid dash">
@@ -802,9 +802,9 @@
       const lines = all.sort((a, b) => ranking.indexOf(a) - ranking.indexOf(b)).map((s) => ({ key: s, label: d.labels[s], color: srcColor(s) }));
       el.innerHTML = `${toolbar()}
         <div class="card"><div class="card-head"><h2>Rangliste</h2></div>
-          <div class="card-body flush"><p class="explain" style="padding:0 18px">${ic('trophy')} Am genauesten: <b>${esc(res[0].label)}</b> – im Mittel ${pct(res[0].day_nmae_pct)} Abweichung beim ${what}.
-            <span class="faint">Genauigkeit = 100 % minus mittlerer Stundenfehler relativ zum Messwert. Tagesabweichung = Fehler beim ${what}. Summe = systematische Über- (+) oder Unterschätzung.${isLoad ? ' Grundverbrauch = Hausverbrauch ohne E-Auto und Heizstab; „Wie vor einer Woche“ ist der Vergleichsmaßstab.' : ''}</span></p>
-          <div class="table-wrap"><table class="table"><thead><tr><th></th><th>Quelle</th><th>Genauigkeit</th><th class="num">Tagesabw. Ø</th><th class="num">Summe</th><th class="num">Größter Tagesfehler</th><th class="num hide-md">Stundenfehler Ø</th><th class="num hide-md">RMSE</th><th class="num">Tage</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
+          <div class="card-body flush"><p class="explain" style="padding:0 18px">${ic('trophy')} Am genauesten: <b>${esc(res[0].label)}</b> – Genauigkeit ${pct(res[0].score, 1)}, beim ${what} im Mittel ${pct(res[0].day_nmae_pct)} daneben.
+            <span class="faint">Sortiert nach Genauigkeit = 100 % minus mittlerer Fehler je Stunde relativ zum Messwert – für die Planung zählt jede Stunde. Tagesabweichung = Fehler beim ${what}; dort kann eine andere Quelle vorn liegen, weil sich Fehler über den Tag ausgleichen. Tendenz = systematische Über- (+) oder Unterschätzung.${isLoad ? ' Grundverbrauch = Hausverbrauch ohne E-Auto und Heizstab; „Wie vor einer Woche“ ist der Vergleichsmaßstab.' : ''}</span></p>
+          <div class="table-wrap"><table class="table"><thead><tr><th></th><th>Quelle</th><th>Genauigkeit</th><th class="num">Tagesabw. Ø</th><th class="num">Tendenz</th><th class="num">Größter Tagesfehler</th><th class="num hide-md">Stundenfehler Ø</th><th class="num hide-md">RMSE</th><th class="num">Tage</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
         ${isLoad ? '' : modelCard(d.model)}
         ${classTable}
         <div class="card"><div class="card-head"><h2>${isLoad ? 'Tagesverbrauch' : 'Tageserträge'} <span class="sub">Klick auf einen Tag zeigt den Stundenverlauf</span></h2></div>
@@ -846,14 +846,32 @@
       const ranking = (S.overview && S.overview.ranking) || [];
       const hidden = hiddenSet(ranking, sources);
       const lines = sources.sort((a, b) => (ranking.indexOf(a) + 1 || 99) - (ranking.indexOf(b) + 1 || 99)).map((s) => ({ key: s, label: d.labels[s], color: srcColor(s) }));
-      const actSum = d.actual.some((v) => v != null) ? d.actual.reduce((a, v) => a + (v || 0), 0) / 1000 : null;
+      // compare only the hours that were measured (today: up to now) - never a whole day against a few hours
+      const measured = d.hours.map((_t, i) => i).filter((i) => d.actual[i] != null);
+      const actSum = measured.length ? measured.reduce((a, i) => a + d.actual[i], 0) / 1000 : null;
+      const partDay = measured.length > 0 && measured.length < d.hours.length;
+      const coverage = (vals) => vals.filter((v) => v != null).length;
+      const full = Math.max(0, ...lines.map((l) => coverage((d.forecasts[l.key] || {})[cfg.horizon] || [])));
       const rows = lines.map((l) => {
         const vals = (d.forecasts[l.key] || {})[cfg.horizon];
         if (!vals) return '';
         const total = vals.reduce((a, v) => a + (v || 0), 0) / 1000;
-        const dev = actSum ? ((total - actSum) / actSum) * 100 : null;
-        return { l, total, dev };
-      }).filter(Boolean).sort((a, b) => (a.dev == null ? 1e9 : Math.abs(a.dev)) - (b.dev == null ? 1e9 : Math.abs(b.dev)));
+        const both = measured.filter((i) => vals[i] != null);
+        const fc = both.reduce((a, i) => a + vals[i], 0) / 1000;
+        const act = both.reduce((a, i) => a + d.actual[i], 0) / 1000;
+        // small amounts (early morning) as kWh - percentages of a few hundred Wh say nothing
+        const dev = !both.length ? null : act >= 1 ? { v: ((fc - act) / act) * 100, u: '%' } : { v: fc - act, u: 'kWh' };
+        const hrs = coverage(vals);
+        return { l, total, dev, partial: hrs < full * 0.8, hrs };
+      }).filter(Boolean).sort((a, b) => (a.partial - b.partial) || ((a.dev == null ? 1e9 : Math.abs(a.dev.u === '%' ? a.dev.v : a.dev.v * 100)) - (b.dev == null ? 1e9 : Math.abs(b.dev.u === '%' ? b.dev.v : b.dev.v * 100))));
+      // ranking: only sources with a comparison over the measured hours
+      let rank = 0;
+      rows.forEach((r) => { r.rank = r.dev != null && !r.partial ? ++rank : null; });
+      const ranked = rank > 0;
+      const rankCell = (r) => (ranked ? `<span class="rank ${r && r.rank === 1 ? 'r1' : ''} ${r && r.rank ? '' : 'none'}">${r && r.rank ? r.rank : ''}</span>` : '');
+      const lastH = measured.length ? d.hours[measured[measured.length - 1]] + 3600 : null;
+      const devTxt = (r) => (r.dev == null ? (r.partial ? `nur ${r.hrs} ${r.hrs === 1 ? 'Stunde' : 'Stunden'} berechnet` : '&nbsp;')
+        : `<span class="${r.dev.v > 0 ? 'pos' : 'neg'}">${r.dev.u === '%' ? `${signed(r.dev.v)} %` : `${signed(r.dev.v, 2)} kWh`}</span> zur Messung${r.partial ? ` · nur ${r.hrs} ${r.hrs === 1 ? 'Stunde' : 'Stunden'} berechnet` : ''}`);
       const today = localDay();
       el.innerHTML = `<div class="toolbar">
           <div class="day-nav"><button class="icon-btn" id="dPrev" title="Vorheriger Tag">${ic('chevronL')}</button><input class="input" type="date" id="dPick" value="${day}"><button class="icon-btn" id="dNext" title="Nächster Tag">${ic('chevron')}</button>${day !== today ? `<button class="btn sm" id="dToday">Heute</button>` : ''}</div>
@@ -863,9 +881,10 @@
         <div class="grid dash">
           <div class="card"><div class="card-head"><h2>${cfg.series === BASE ? 'Grundverbrauch <span class="sub">stündlich, ohne E-Auto und Heizstab</span>' : 'PV-Erzeugung <span class="sub">stündlich</span>'}</h2></div>
             <div class="card-body">${legendHTML(MEASURED, lines, hidden)}<div class="chart tall" id="dayChart"></div></div></div>
-          <div class="card"><div class="card-head"><h2>Tagessumme</h2></div><div class="card-body flush">
-            <div class="list"><div class="list-item"><span class="swatch-dot" style="background:var(--measured);opacity:.6"></span><div class="grow"><div class="title">Gemessen</div><div class="meta">${actSum == null ? 'keine Messwerte' : 'volle Stunden'}</div></div><b class="num">${kwh(actSum)}</b></div>
-            ${rows.map((r) => `<div class="list-item"><span class="swatch-dot" style="background:${r.l.color}"></span><div class="grow"><div class="title">${esc(r.l.label)}</div><div class="meta">${r.dev == null ? '&nbsp;' : `<span class="${r.dev > 0 ? 'pos' : 'neg'}">${signed(r.dev)} %</span> zur Messung`}</div></div><b class="num">${kwh(r.total)}</b></div>`).join('')}</div></div></div>
+          <div class="card"><div class="card-head"><h2>Tagessumme<div class="faint" style="font-weight:400;font-size:12.5px">${ranked ? `Rangliste – Platz 1 = kleinste Abweichung zur Messung${partDay ? ' (bisher)' : ''}` : 'Prognosen für den ganzen Tag'}</div></h2>${ranked ? '<span class="faint" style="font-size:12px">Tag gesamt</span>' : ''}</div><div class="card-body flush">
+            <div class="list"><div class="list-item">${rankCell(null)}<span class="swatch-dot" style="background:var(--measured);opacity:.6"></span><div class="grow"><div class="title">Gemessen</div><div class="meta">${actSum == null ? 'keine Messwerte' : partDay ? `${measured.length} volle Stunden, bis ${fmtHour(lastH)}` : 'ganzer Tag'}</div></div><b class="num">${kwh(actSum)}</b></div>
+            ${rows.map((r) => `<div class="list-item ${r.partial ? 'faded' : ''}">${rankCell(r)}<span class="swatch-dot" style="background:${r.l.color}"></span><div class="grow"><div class="title">${esc(r.l.label)}</div><div class="meta">${devTxt(r)}</div></div><b class="num">${kwh(r.total)}</b></div>`).join('')}</div>
+            ${partDay || rows.some((r) => r.partial) ? `<div class="muted" style="padding:10px 18px 12px;font-size:12.5px;border-top:1px solid var(--border)">${partDay ? 'Rechts steht die Prognose für den ganzen Tag, die Abweichung vergleicht nur die Stunden, die schon gemessen sind.' : ''}${rows.some((r) => r.partial) ? ' Die live korrigierte Prognose wird immer nur für die nächsten Stunden berechnet – ihre Summe umfasst nur diese Stunden und ist keine Tagesprognose.' : ''}</div>` : ''}</div></div>
         </div>
         <div class="card"><div class="card-head"><h2>Strompreis <span class="sub">inkl. Aufschläge und MwSt</span></h2></div><div class="card-body"><div class="chart" id="dayPrice"></div></div></div>`;
       chart($('#dayChart'), {
