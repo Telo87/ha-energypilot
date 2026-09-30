@@ -226,7 +226,7 @@
     const opts = arrays.length > 1 ? [['_total', 'Alle Anlagen'], ...arrays.map((a) => [a.id, a.name])] : arrays.length ? [['_total', arrays[0].name]] : [];
     if (S.settings && S.settings.sensors.house) opts.push([BASE, 'Grundverbrauch']);
     if (opts.length < 2) return '';
-    return `<select class="input" id="${id}" style="width:auto">${opts.map(([v, l]) => `<option value="${esc(v)}" ${cur === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+    return `<div class="seg" id="${id}" role="group" aria-label="Auswahl">${opts.map(([v, l]) => `<button type="button" data-v="${esc(v)}" class="${cur === v ? 'active' : ''}">${ic(v === BASE ? 'home' : 'solar')}${esc(l)}</button>`).join('')}</div>`;
   }
   const CLASS_LABEL = { sunny: ['Sonnig', 'sun'], mixed: ['Wechselhaft', 'cloudSun'], cloudy: ['Trüb', 'cloud'] };
   const HORIZONS = [['d1', 'Vortag', 'Prognose vom Vortag (vor Mitternacht) – die Grundlage für die Planung des nächsten Tages'], ['d0', 'Kurzfristig', 'Letzte Prognose vor der jeweiligen Stunde']];
@@ -823,7 +823,7 @@
     const bind = () => {
       $$('#accDays button').forEach((b) => b.addEventListener('click', () => { cfg.days = Number(b.dataset.v); load(); }));
       $$('#accHz button').forEach((b) => b.addEventListener('click', () => { cfg.horizon = b.dataset.v; load(); }));
-      const sel = $('#accSeries'); if (sel) sel.addEventListener('change', () => { cfg.series = sel.value; load(); });
+      $$('#accSeries button').forEach((b) => b.addEventListener('click', () => { cfg.series = b.dataset.v; load(); }));
       $('#accCommon').addEventListener('change', (e) => { cfg.common = e.target.checked; load(); });
     };
     await load();
@@ -903,7 +903,7 @@
       $('#dPick').addEventListener('change', (e) => { if (e.target.value) go(e.target.value); });
       if ($('#dToday')) $('#dToday').addEventListener('click', () => go(today));
       $$('#dHz button').forEach((b) => b.addEventListener('click', () => { cfg.horizon = b.dataset.v; draw(); }));
-      const sel = $('#dSeries'); if (sel) sel.addEventListener('change', () => { cfg.series = sel.value; store.set('dayCfg', cfg); navigate(); });
+      $$('#dSeries button').forEach((b) => b.addEventListener('click', () => { if (b.dataset.v === cfg.series) return; cfg.series = b.dataset.v; store.set('dayCfg', cfg); navigate(); }));
       $$('.legend button[data-series]', el).forEach((b) => b.addEventListener('click', () => { toggleHidden(b.dataset.series); draw(); }));
     };
     draw();

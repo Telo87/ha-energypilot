@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.7
+
+- Tagesverlauf und Prognose-Check: Die Auswahl „Alle Anlagen / einzelne Anlage / Grundverbrauch“ ist jetzt eine Reihe von Schaltflächen statt einer Aufklappliste
+
 ## 0.5.6
 
 - Behoben: Die Live-Korrektur der PV-Prognose wurde auch auf die Verbrauchsprognose kopiert (beide tragen intern dasselbe Kürzel) und erschien deshalb beim Grundverbrauch in Tagesverlauf und Prognose-Check. Der Plan war nicht betroffen. Die falschen Werte werden beim Update gelöscht
