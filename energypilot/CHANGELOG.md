@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.4
+
+- Menü neu gegliedert: „Heute“ (Übersicht, Planung, Strompreise), „Auswertung“ (Tagesverlauf, Prognose-Check, Protokoll, Kosten) und „Verwaltung“
+
 ## 0.5.3
 
 - Einstellungen → Sensoren & Standort neu aufgebaut: Gruppen für Haus, Stromnetz, Batterie und große Verbraucher, je mit Status („eingerichtet“, „fehlt“, „optional“)

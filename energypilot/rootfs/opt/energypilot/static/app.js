@@ -380,12 +380,12 @@
 
   // ------------------------------------------------------------------ pages
   const PAGES = [
-    { id: 'dashboard', title: 'Übersicht', icon: 'grid', section: 'Energie' },
-    { id: 'plan', title: 'Planung', icon: 'battery' },
-    { id: 'journal', title: 'Protokoll', icon: 'journal' },
-    { id: 'accuracy', title: 'Prognose-Check', icon: 'target' },
-    { id: 'day', title: 'Tagesverlauf', icon: 'chart' },
+    { id: 'dashboard', title: 'Übersicht', icon: 'grid', section: 'Heute' },
+    { id: 'plan', title: 'Planung', icon: 'clock' },
     { id: 'prices', title: 'Strompreise', icon: 'euro' },
+    { id: 'day', title: 'Tagesverlauf', icon: 'chart', section: 'Auswertung' },
+    { id: 'accuracy', title: 'Prognose-Check', icon: 'target' },
+    { id: 'journal', title: 'Protokoll', icon: 'journal' },
     { id: 'costs', title: 'Kosten', icon: 'wallet' },
     { id: 'setup', title: 'Einrichtung', icon: 'checkCircle', section: 'Verwaltung' },
     { id: 'settings', title: 'Einstellungen', icon: 'gear' },
