@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1
+
+- Kosten: Der dynamische Tarif lässt sich wahlweise mit einem Festpreistarif oder mit einer **Flat mit Freistrom** vergleichen (Einstellungen › Strompreis › „Vergleichen mit“). Für die Flat: Grundgebühr, Freistrom pro Jahr, Preis über dem Freistrom, eigene Einspeisevergütung und Beginn des Abrechnungsjahres
+- Kosten: Der Freistrom wird wie bei der Abrechnung ab Beginn des Abrechnungsjahres fortlaufend verbraucht; eine neue Karte zeigt den Stand („1.366 von 2.500 kWh“) und wie lange der Rest beim Verbrauch der letzten 30 Tage reicht
+
 ## 0.6.0
 
 - Protokoll: Die Nachrechnung nutzt jetzt den gesamten gemessenen Hausverbrauch einschließlich E-Auto, das auch aus dem Akku geladen wird. Bisher rechnete sie nur mit dem Grundverbrauch; lief z. B. der Heizstab mit PV-Überschuss, wurde dieser Strom fälschlich als Einspeisung gezählt

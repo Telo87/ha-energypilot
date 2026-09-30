@@ -329,3 +329,30 @@ def test_surplus_heater_never_empties_the_battery(tmp_path):
     hub.settings.update({"devices": {"heater_surplus": False}})
     base = next(d for d in hub.journal(days=3)["days"] if d["hours"])["bills"]["base"]
     assert "heater_kwh" in base and base["import_kwh"] == 0  # as a normal load it eats into the surplus instead
+
+
+def test_flat_tariff_uses_free_amount_from_the_billing_year_start(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"sensors": {"grid": "sensor.grid"}, "tariff": {
+        "compare_type": "flat", "flat_fee_eur": 30.0, "flat_free_kwh": 3650.0, "flat_price_ct": 40.0,
+        "flat_feed_in_ct": 5.0, "flat_year_start": 1, "feed_in_ct": 8.0}})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    # three measured days: 5.75 kWh import, 1 kWh export each; billing year starts in their month
+    first = hub.midnight(hub.midnight(int(time.time())) - 3 * 86400)
+    hub.settings.update({"tariff": {"flat_year_start": int(hub.day_key(first)[5:7])}})
+    for d in range(3):
+        day0 = hub.midnight(first + d * 86400 + 7200)
+        hub.db.put_actual([("grid", day0 + h * 3600, 250.0) for h in range(24)])
+        hub.db.put_actual([("grid", day0 + 12 * 3600, -1000.0)])  # noon: export instead
+    res = hub.costs(first, hub.midnight(first + 3 * 86400 + 7200))
+    fl = res["flat"]
+    # days before the recording used their share (10 kWh/day), measured days add their import
+    assert fl["estimated_kwh"] > 0 and fl["remaining_kwh"] < 3650
+    day = res["days"][0]
+    assert day["import_kwh"] == 5.75 and day["export_kwh"] == 1.0
+    assert fl["remaining_kwh"] > 0  # nothing above the free amount: fee minus the flat's own feed-in
+    assert day["compare_total_eur"] == round(30 * 12 / 365 - 1.0 * 0.05, 2)
+    # without free energy every kWh costs the price above it
+    hub.settings.update({"tariff": {"flat_free_kwh": 0}})
+    day = hub.costs(first, hub.midnight(first + 3 * 86400 + 7200))["days"][0]
+    assert day["compare_total_eur"] == round(30 * 12 / 365 + 5.75 * 0.40 - 1.0 * 0.05, 2)

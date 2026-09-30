@@ -976,6 +976,7 @@
   }
 
   // ------------------------------------------------------------------ costs
+  const MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
   const monthName = (ym) => new Date(`${ym}-15T12:00:00`).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
   const shiftMonth = (ym, n) => { const d = new Date(`${ym}-15T12:00:00`); d.setMonth(d.getMonth() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
   async function renderCosts(el, token) {
@@ -1000,33 +1001,43 @@
     }
     const kpi = (icon, cls, label, value, foot) => `<div class="card kpi"><div class="kpi-label"><span class="kpi-icon ${cls}">${ic(icon)}</span>${label}</div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`;
     const better = t.avg_paid_ct != null && t.avg_market_ct != null ? t.avg_market_ct - t.avg_paid_ct : null;
+    const isFlat = tf.compare_type === 'flat';
+    const cmpName = isFlat ? 'Flat' : 'Festpreis';
+    const cmpText = isFlat ? `Flat ${nf(tf.flat_fee_eur, 2)} €/Monat mit ${nf(tf.flat_free_kwh, 0)} kWh Freistrom, darüber ${nf(tf.flat_price_ct, 1)} ct/kWh`
+      : `Festpreis ${nf(tf.compare_price_ct, 1)} ct/kWh + ${nf(tf.compare_base_fee_eur, 2)} €/Monat`;
+    const fl = d.flat;
+    const flatCard = fl && fl.free_kwh > 0 ? `<div class="card" style="margin-top:16px"><div class="card-head"><h2>Freistrom der Flat <span class="sub">Abrechnungsjahr ${new Date(`${fl.year_start}T12:00:00`).toLocaleDateString('de-DE')} – ${new Date(new Date(`${fl.year_end}T12:00:00`) - 86400000).toLocaleDateString('de-DE')}</span></h2></div><div class="card-body">
+        <div class="row" style="justify-content:space-between;margin-bottom:6px"><b>${nf(fl.used_kwh, 0)} von ${nf(fl.free_kwh, 0)} kWh verbraucht</b><span class="muted">${fl.remaining_kwh > 0 ? `noch ${nf(fl.remaining_kwh, 0)} kWh frei` : `aufgebraucht am ${fmtDay(dayTs(fl.exhausted))}`}</span></div>
+        <div class="progress"><i style="width:${Math.min(100, (fl.used_kwh / fl.free_kwh) * 100)}%;${fl.remaining_kwh > 0 ? '' : 'background:var(--err)'}"></i></div>
+        <p class="faint" style="font-size:12.5px;margin:10px 0 0">Stand ${fmtDay(dayTs(d.days[d.days.length - 1].day))} · ${fl.remaining_kwh > 0 ? (fl.until ? `Beim Verbrauch der letzten 30 Tage reicht der Freistrom bis etwa ${new Date(`${fl.until}T12:00:00`).toLocaleDateString('de-DE')}.` : 'Beim Verbrauch der letzten 30 Tage reicht er bis zum Ende des Abrechnungsjahres.') : 'Seitdem kostet jede kWh den Preis über dem Freistrom.'}${fl.estimated_kwh > 0 ? ` Für Tage ohne Messwerte ist der anteilige Freistrom als verbraucht angesetzt (${nf(fl.estimated_kwh, 0)} kWh).` : ''}</p></div></div>` : '';
     el.innerHTML = `${nav}
       <div class="grid kpis">
         ${kpi('wallet', '', 'Stromkosten', `${cnt('ct', nf(t.total_eur, 2))}<small>€</small>`, `Netzbezug ${eur(t.energy_eur)} + Grundgebühr ${eur(t.fee_eur)} − Einspeisung ${eur(t.feed_in_eur)}${t.days < 28 ? ` · ${t.days} Tage` : ''}`)}
         ${kpi('euro', better != null && better > 0 ? 'ok' : 'warn', 'Ø bezahlter Preis', t.avg_paid_ct == null ? '–' : `${cnt('cp', nf(t.avg_paid_ct, 1))}<small>ct/kWh</small>`, t.avg_market_ct == null ? '' : `Ø aller Viertelstunden ${nf(t.avg_market_ct, 1)} ct${better != null ? ` · ${better >= 0 ? `${nf(better, 1)} ct günstiger gekauft` : `${nf(-better, 1)} ct teurer gekauft`}` : ''}`)}
         ${kpi('plug', '', 'Netzbezug', `${cnt('ci', nf(t.import_kwh, 0))}<small>kWh</small>`, `Einspeisung ${nf(t.export_kwh, 0)} kWh${tf.feed_in_ct ? ` à ${nf(tf.feed_in_ct, 2)} ct` : ' – Vergütung in den Einstellungen eintragen'}`)}
-        ${kpi('trophy', t.savings_eur >= 0 ? 'ok' : 'err', t.savings_eur >= 0 ? 'Gespart ggü. Festpreis' : 'Mehrkosten ggü. Festpreis', `${cnt('cs', nf(Math.abs(t.savings_eur), 2))}<small>€</small>`, `Festpreis ${nf(tf.compare_price_ct, 1)} ct/kWh + ${nf(tf.compare_base_fee_eur, 2)} €/Monat wären ${eur(t.compare_total_eur)} gewesen`)}
+        ${kpi('trophy', t.savings_eur >= 0 ? 'ok' : 'err', t.savings_eur >= 0 ? `Gespart ggü. ${cmpName}` : `Mehrkosten ggü. ${cmpName}`, `${cnt('cs', nf(Math.abs(t.savings_eur), 2))}<small>€</small>`, `${cmpText} wäre${isFlat ? '' : 'n'} ${eur(t.compare_total_eur)} gewesen`)}
         ${t.autarky_pct != null ? kpi('home', 'up', 'Autarkie', `${cnt('ca', nf(t.autarky_pct, 0))}<small>%</small>`, `des Hausverbrauchs aus eigener Erzeugung${t.self_use_pct != null ? ` · Eigenverbrauch ${nf(t.self_use_pct, 0)} % der PV` : ''}`) : ''}
       </div>
       ${t.unpriced_kwh > 0.5 ? `<div class="notice" style="margin-top:16px">${ic('info')}<div>Für ${nf(t.unpriced_kwh, 1)} kWh Netzbezug liegt kein Börsenpreis vor – sie fehlen in den Kosten.</div></div>` : ''}
       ${!tf.base_fee_eur ? `<div class="notice info" style="margin-top:16px">${ic('info')}<div>Grundgebühr, Einspeisevergütung und den Vergleichstarif trägst du unter <a href="#/settings?tab=tariff">Einstellungen › Strompreis</a> ein.</div></div>` : ''}
+      ${flatCard}
       <div class="card" style="margin-top:16px"><div class="card-head"><h2>Stromkosten pro Tag <span class="sub">inkl. anteiliger Grundgebühr, abzüglich Einspeisung</span></h2></div><div class="card-body">
-        <div class="legend"><span class="static"><i class="box" style="background:var(--price)"></i>Dynamischer Tarif</span><span class="static"><i style="background:var(--text-2)"></i>Festpreis</span></div>
+        <div class="legend"><span class="static"><i class="box" style="background:var(--price)"></i>Dynamischer Tarif</span><span class="static"><i style="background:var(--text-2)"></i>${cmpName}</span></div>
         <div class="chart" id="costChart"></div></div></div>
       <div class="grid cols-2">
         <div class="card"><div class="card-head"><h2>Tage</h2></div><div class="card-body flush"><div class="table-wrap"><table class="table compact">
-          <thead><tr><th>Tag</th><th class="num">Bezug kWh</th><th class="num">Ø ct</th><th class="num">Einsp. kWh</th><th class="num">Kosten</th><th class="num">Festpreis</th></tr></thead><tbody>
+          <thead><tr><th>Tag</th><th class="num">Bezug kWh</th><th class="num">Ø ct</th><th class="num">Einsp. kWh</th><th class="num">Kosten</th><th class="num">${cmpName}</th></tr></thead><tbody>
           ${d.days.slice().reverse().map((x) => `<tr><td class="nowrap">${fmtDay(dayTs(x.day))}${x.hours < 23 ? ` <span class="faint">(${x.hours} h)</span>` : ''}</td><td class="num">${nf(x.import_kwh, 1)}</td><td class="num">${x.avg_paid_ct == null ? '–' : nf(x.avg_paid_ct, 1)}</td><td class="num">${nf(x.export_kwh, 1)}</td><td class="num">${eur(x.total_eur)}</td><td class="num faint">${eur(x.compare_total_eur)}</td></tr>`).join('')}
           </tbody></table></div></div></div>
         <div class="card"><div class="card-head"><h2>Monate</h2></div><div class="card-body flush"><div class="table-wrap"><table class="table compact">
-          <thead><tr><th>Monat</th><th class="num">Bezug kWh</th><th class="num">Ø ct</th><th class="num">Kosten</th><th class="num">ggü. Festpreis</th></tr></thead><tbody>
+          <thead><tr><th>Monat</th><th class="num">Bezug kWh</th><th class="num">Ø ct</th><th class="num">Kosten</th><th class="num">ggü. ${cmpName}</th></tr></thead><tbody>
           ${months.map((x) => `<tr class="click" data-m="${x.month}"><td class="nowrap">${esc(monthName(x.month))}${x.days < 28 ? ` <span class="faint">(${x.days} T.)</span>` : ''}</td><td class="num">${nf(x.import_kwh, 0)}</td><td class="num">${x.avg_paid_ct == null ? '–' : nf(x.avg_paid_ct, 1)}</td><td class="num">${eur(x.total_eur)}</td><td class="num ${x.savings_eur >= 0 ? 'best' : 'pos'}">${x.savings_eur >= 0 ? '−' : '+'}${nf(Math.abs(x.savings_eur), 2)} €</td></tr>`).join('')}
           </tbody></table></div></div></div>
       </div>`;
     chart($('#costChart'), {
       xs: d.days.map((x) => dayTs(x.day)), step: 86400, height: 220, tickCenter: true,
       bar: { label: 'Stromkosten', color: 'var(--price)', cls: 'bar-p', values: d.days.map((x) => x.total_eur), clsFor: (i, v) => (v < 0 ? 'neg' : '') },
-      lines: [{ key: 'fix', label: 'Festpreis', color: 'var(--text-2)', dash: true, values: d.days.map((x) => x.compare_total_eur) }],
+      lines: [{ key: 'fix', label: cmpName, color: 'var(--text-2)', dash: true, values: d.days.map((x) => x.compare_total_eur) }],
       fmt: (v) => eur(v), axisFmt: (v) => `${nf(v, 2)} €`, head: (ts) => fmtDay(ts), tick: (ts) => new Date(ts * 1000).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }),
     });
     bindNav();
@@ -1348,9 +1359,18 @@
             <div class="field"><label>Einspeisevergütung (ct/kWh)</label><input class="input" id="t_feed" type="number" step="0.01" min="0" value="${t.feed_in_ct}"><span class="hint">Für Planung und Kostenübersicht</span></div>
             <div class="field"><label>Grundgebühr (€/Monat)</label><input class="input" id="t_fee" type="number" step="0.01" min="0" value="${t.base_fee_eur ?? 0}"><span class="hint">Nur für die Kostenübersicht</span></div>
           </div>
-          <div class="field" style="margin-top:4px"><label>Vergleich mit einem Festpreistarif</label>
-            <div class="form-grid"><div class="field" style="margin:0"><input class="input" id="t_cmp" type="number" step="0.01" min="0" value="${t.compare_price_ct ?? 32}"><span class="hint">Arbeitspreis brutto (ct/kWh)</span></div>
-            <div class="field" style="margin:0"><input class="input" id="t_cmpfee" type="number" step="0.01" min="0" value="${t.compare_base_fee_eur ?? 12}"><span class="hint">Grundpreis (€/Monat)</span></div></div></div>
+          <div class="field" style="margin-top:4px"><label>Vergleichen mit</label>
+            <div class="seg" id="t_ctype">${[['fixed', 'Festpreis'], ['flat', 'Flat mit Freistrom']].map(([v, l]) => `<button type="button" data-v="${v}" class="${(t.compare_type || 'fixed') === v ? 'active' : ''}">${l}</button>`).join('')}</div>
+            <span class="hint">Die Kosten-Seite zeigt, was du mit diesem Tarif statt dem dynamischen bezahlt hättest.</span></div>
+          <div class="form-grid" id="t_fixed">
+            <div class="field"><label>Arbeitspreis brutto (ct/kWh)</label><input class="input" id="t_cmp" type="number" step="0.01" min="0" value="${t.compare_price_ct ?? 32}"></div>
+            <div class="field"><label>Grundpreis (€/Monat)</label><input class="input" id="t_cmpfee" type="number" step="0.01" min="0" value="${t.compare_base_fee_eur ?? 12}"></div></div>
+          <div class="form-grid" id="t_flat">
+            <div class="field"><label>Grundgebühr (€/Monat)</label><input class="input" id="t_ffee" type="number" step="0.01" min="0" value="${t.flat_fee_eur ?? 0}"></div>
+            <div class="field"><label>Freistrom (kWh/Jahr)</label><input class="input" id="t_ffree" type="number" step="1" min="0" value="${t.flat_free_kwh ?? 0}"><span class="hint">Netzbezug, der mit der Grundgebühr bezahlt ist</span></div>
+            <div class="field"><label>Preis über dem Freistrom (ct/kWh)</label><input class="input" id="t_fprice" type="number" step="0.01" min="0" value="${t.flat_price_ct ?? 0}"><span class="hint">brutto</span></div>
+            <div class="field"><label>Einspeisevergütung (ct/kWh)</label><input class="input" id="t_ffeed" type="number" step="0.01" min="0" value="${t.flat_feed_in_ct ?? 0}"><span class="hint">die in diesem Tarif gezahlt wird</span></div>
+            <div class="field"><label>Abrechnungsjahr beginnt</label><select class="input" id="t_fstart">${MONTHS.map((m, i) => `<option value="${i + 1}" ${Number(t.flat_year_start || 1) === i + 1 ? 'selected' : ''}>${m}</option>`).join('')}</select><span class="hint">Ab dann wird der Freistrom verbraucht</span></div></div>
           <div class="notice info" id="t_prev">${ic('info')}<div></div></div>
           <div class="row" style="margin-top:14px"><button class="btn primary" id="t_save">${ic('check')}Speichern</button></div>
         </div></div>
@@ -1403,7 +1423,12 @@
       };
       ['#t_markup', '#t_vat'].forEach((id) => $(id).addEventListener('input', prev));
       prev();
-      $('#t_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({ tariff: { bidding_zone: $('#t_zone').value, markup_ct: $('#t_markup').value, vat: $('#t_vat').value, feed_in_ct: $('#t_feed').value, base_fee_eur: $('#t_fee').value, compare_price_ct: $('#t_cmp').value, compare_base_fee_eur: $('#t_cmpfee').value } })));
+      const ctype = () => ($('#t_ctype button.active') || {}).dataset?.v || 'fixed';
+      const showType = () => { $('#t_fixed').classList.toggle('hidden', ctype() !== 'fixed'); $('#t_flat').classList.toggle('hidden', ctype() !== 'flat'); };
+      $$('#t_ctype button').forEach((btn) => btn.addEventListener('click', () => { $$('#t_ctype button').forEach((x) => x.classList.toggle('active', x === btn)); showType(); }));
+      showType();
+      $('#t_save').addEventListener('click', (e) => withBusy(e.currentTarget, () => saveSettings({ tariff: { bidding_zone: $('#t_zone').value, markup_ct: $('#t_markup').value, vat: $('#t_vat').value, feed_in_ct: $('#t_feed').value, base_fee_eur: $('#t_fee').value, compare_price_ct: $('#t_cmp').value, compare_base_fee_eur: $('#t_cmpfee').value,
+        compare_type: ctype(), flat_fee_eur: $('#t_ffee').value, flat_free_kwh: $('#t_ffree').value, flat_price_ct: $('#t_fprice').value, flat_feed_in_ct: $('#t_ffeed').value, flat_year_start: $('#t_fstart').value } })));
     };
     draw();
   }

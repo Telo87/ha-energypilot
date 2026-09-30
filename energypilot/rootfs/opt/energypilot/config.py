@@ -79,9 +79,15 @@ DEFAULT_SETTINGS: dict = {
         "vat": 19.0,
         "feed_in_ct": 0.0,
         "base_fee_eur": 0.0,  # monthly base fee - only for the cost overview
-        # fixed-price tariff to compare with (gross)
-        "compare_price_ct": 32.0,
-        "compare_base_fee_eur": 12.0,
+        # tariff to compare the dynamic one with: "fixed" price or "flat" with free kWh per year
+        "compare_type": "fixed",
+        "compare_price_ct": 32.0,  # fixed: gross price per kWh
+        "compare_base_fee_eur": 12.0,  # fixed: per month
+        "flat_fee_eur": 0.0,  # flat: per month
+        "flat_free_kwh": 0.0,  # flat: free grid energy per billing year
+        "flat_price_ct": 0.0,  # flat: gross price per kWh above the free amount
+        "flat_feed_in_ct": 0.0,  # flat: its own feed-in payment
+        "flat_year_start": 1,  # flat: month the billing year starts
     },
     # ev / heater: measured separately and subtracted from the house consumption
     "sensors": {"house": "", "grid": "", "battery_soc": "", "battery_power": "", "ev": "", "heater": "",
@@ -288,9 +294,14 @@ class Settings:
                     zone = str(tariff["bidding_zone"] or "").strip().upper()
                     t["bidding_zone"] = zone if re.fullmatch(r"[A-Z0-9-]{2,10}", zone) else "DE-LU"
                 for key, hi in (("markup_ct", 200), ("vat", 50), ("feed_in_ct", 100), ("base_fee_eur", 200),
-                                ("compare_price_ct", 200), ("compare_base_fee_eur", 200)):
+                                ("compare_price_ct", 200), ("compare_base_fee_eur", 200), ("flat_fee_eur", 500),
+                                ("flat_free_kwh", 100000), ("flat_price_ct", 200), ("flat_feed_in_ct", 100)):
                     if key in tariff:
                         t[key] = _num(tariff[key], t[key], 0, hi)
+                if tariff.get("compare_type") in ("fixed", "flat"):
+                    t["compare_type"] = tariff["compare_type"]
+                if "flat_year_start" in tariff:
+                    t["flat_year_start"] = int(_num(tariff["flat_year_start"], t["flat_year_start"], 1, 12))
             inv = values.get("invert")
             if isinstance(inv, dict):
                 for key in DEFAULT_SETTINGS["invert"]:

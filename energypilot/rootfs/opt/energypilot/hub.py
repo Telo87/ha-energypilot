@@ -520,9 +520,15 @@ class Hub:
             if t in acts.get("house", {}):
                 d["house_kwh"] += max(0.0, acts["house"][t] * house_sign) / 1000
         fee_day = float(tariff.get("base_fee_eur", 0)) * 12 / 365
-        cmp_fee_day = float(tariff.get("compare_base_fee_eur", 0)) * 12 / 365
         feed = float(tariff.get("feed_in_ct", 0))
-        cmp_price = float(tariff.get("compare_price_ct", 0))
+        flat = self.flat_usage(start, end) if tariff.get("compare_type") == "flat" else None
+        if flat:
+            cmp_fee_day = float(tariff.get("flat_fee_eur", 0)) * 12 / 365
+            cmp_feed = float(tariff.get("flat_feed_in_ct", 0))
+        else:
+            cmp_fee_day = float(tariff.get("compare_base_fee_eur", 0)) * 12 / 365
+            cmp_feed = feed
+        cmp_price = float(tariff.get("flat_price_ct" if flat else "compare_price_ct", 0))
         out_days = []
         tot = defaultdict(float)
         for day, d in sorted(days.items()):
@@ -540,10 +546,11 @@ class Hub:
                 "avg_paid_ct": round(d["energy_ct"] / priced, 2) if priced > 0.05 else None,
                 "avg_market_ct": round(sum(market[day]) / len(market[day]), 2) if market.get(day) else None,
                 "unpriced_kwh": round(d["unpriced_kwh"], 2),
-                "compare_eur": round((d["import_kwh"] * cmp_price) / 100 + cmp_fee_day, 2),
+                # flat: only what exceeds the free amount is paid
+                "compare_eur": round(((flat["excess"].get(day, 0.0) if flat else d["import_kwh"]) * cmp_price) / 100 + cmp_fee_day, 2),
             }
             row["total_eur"] = round(row["energy_eur"] + row["fee_eur"] - row["feed_in_eur"], 2)
-            row["compare_total_eur"] = round(row["compare_eur"] - row["feed_in_eur"], 2)
+            row["compare_total_eur"] = round(row["compare_eur"] - d["export_kwh"] * cmp_feed / 100, 2)
             out_days.append(row)
             for k in ("import_kwh", "export_kwh", "pv_kwh", "house_kwh", "energy_eur", "fee_eur", "feed_in_eur",
                       "total_eur", "compare_total_eur", "unpriced_kwh"):
@@ -566,7 +573,70 @@ class Hub:
             "totals": totals,
             "split": bool(sensors.get("grid_import") and sensors.get("grid_export")),
             "has_grid": bool(sensors.get("grid") or sensors.get("grid_import")),
-            "tariff": {k: tariff.get(k) for k in ("base_fee_eur", "compare_price_ct", "compare_base_fee_eur", "feed_in_ct")},
+            "tariff": {k: tariff.get(k) for k in (
+                "base_fee_eur", "compare_type", "compare_price_ct", "compare_base_fee_eur", "feed_in_ct",
+                "flat_fee_eur", "flat_free_kwh", "flat_price_ct", "flat_feed_in_ct", "flat_year_start")},
+            "flat": {k: v for k, v in flat.items() if k != "excess"} if flat else None,
+        }
+
+    def flat_usage(self, start: int, end: int) -> dict:
+        """Free amount of a flat tariff, used up day by day from the start of its billing year.
+
+        Measured grid import counts; days without measurements (before the recording
+        started, gaps) use their share of the free amount. What exceeds it is paid."""
+        tariff = self.settings.data["tariff"]
+        free = float(tariff.get("flat_free_kwh", 0))
+        first_day = datetime.fromtimestamp(start, self.tz).date()
+        month = int(tariff.get("flat_year_start", 1))
+        ys = date(first_day.year if first_day.month >= month else first_day.year - 1, month, 1)
+        ye = date(ys.year + 1, month, 1)
+        per_day = free / (ye - ys).days
+        last_day = datetime.fromtimestamp(end - 1, self.tz).date()
+        acts: dict[str, dict[int, float]] = defaultdict(dict)
+        for series, t, wh in self.db.actuals(analysis.day_start(ys.isoformat(), self.tz), end):
+            acts[series][t] = wh
+        imports: dict[str, float] = defaultdict(float)
+        for t in sorted({t for k in ("grid", "grid_in") for t in acts.get(k, {})}):
+            g = self._grid_kwh(acts, t)
+            if g:
+                imports[self.day_key(t)] += g[0]
+        remaining = free
+        measured = estimated = 0.0
+        excess: dict[str, float] = {}
+        exhausted = None
+        day = ys
+        while day <= last_day:
+            key = day.isoformat()
+            if key in imports:
+                use = imports[key]
+                measured += use
+                if day >= first_day:
+                    excess[key] = max(0.0, use - remaining)
+            else:
+                use = min(per_day, remaining)  # no measurement: its share of the free amount
+                estimated += use
+            remaining = max(0.0, remaining - use)
+            if remaining <= 0 and exhausted is None and free > 0:
+                exhausted = key
+            day += timedelta(days=1)
+        # when the rest will be used up at the pace of the last 30 measured days
+        recent = [imports[(last_day - timedelta(days=i)).isoformat()] for i in range(30)
+                  if (last_day - timedelta(days=i)).isoformat() in imports]
+        until = None
+        if remaining > 0 and recent and sum(recent) > 0:
+            left = remaining / (sum(recent) / len(recent))
+            if last_day + timedelta(days=left) < ye:
+                until = (last_day + timedelta(days=int(left))).isoformat()
+        return {
+            "excess": excess,
+            "free_kwh": round(free, 1),
+            "used_kwh": round(measured + estimated, 1),
+            "estimated_kwh": round(estimated, 1),
+            "remaining_kwh": round(remaining, 1),
+            "year_start": ys.isoformat(),
+            "year_end": ye.isoformat(),
+            "exhausted": exhausted,
+            "until": until,
         }
 
     def cost_months(self, count: int = 12) -> list[dict]:

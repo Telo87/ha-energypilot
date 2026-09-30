@@ -152,7 +152,13 @@ abzüglich Einspeisevergütung (Einstellungen › Strompreis). Dazu:
 
 - **Ø bezahlter Preis** gegenüber dem Durchschnitt aller Viertelstunden: liegt er darunter, wird eher in
   günstigen Stunden gekauft – genau das sollen Akku und Planung bewirken.
-- **Vergleich mit einem Festpreistarif** mit einstellbarem Arbeits- und Grundpreis.
+- **Vergleich mit einem anderen Tarif**, wahlweise:
+  - **Festpreis** mit Arbeits- und Grundpreis, oder
+  - **Flat mit Freistrom**: Grundgebühr, Freistrom-Kontingent pro Jahr, Preis über dem Kontingent,
+    eigene Einspeisevergütung und Beginn des Abrechnungsjahres. Das Kontingent wird ab Beginn des
+    Abrechnungsjahres fortlaufend mit dem gemessenen Netzbezug verbraucht; für Tage ohne Messwerte wird der
+    anteilige Freistrom als verbraucht angesetzt. Die Kosten-Seite zeigt, wie viel davon schon verbraucht ist
+    und wie lange der Rest voraussichtlich reicht.
 - **Autarkie** (Anteil des Hausverbrauchs aus eigener Erzeugung) und **Eigenverbrauch** (Anteil der
   PV-Erzeugung, der nicht eingespeist wird).
 
