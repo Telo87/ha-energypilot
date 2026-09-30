@@ -1,6 +1,6 @@
 # EnergyPilot – Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-0.6.4-blue)
+![Version](https://img.shields.io/badge/version-0.7.0-blue)
 
 Welche PV-Prognose stimmt bei **deinem** Dach? EnergyPilot sammelt stündlich die Prognosen mehrerer
 Wetterdienste, vergleicht sie mit der tatsächlichen Erzeugung jeder Anlage und zeigt dynamische
@@ -35,4 +35,6 @@ Batterie, E-Auto und Heizstab.
 
 ## Lizenz
 
-MIT
+[PolyForm Strict 1.0.0](LICENSE) – die Nutzung für nicht-kommerzielle Zwecke ist erlaubt (privat, Hobby,
+gemeinnützige Organisationen). Weitergabe, Veränderung und darauf aufbauende Werke sind nicht erlaubt.
+Versionen bis einschließlich 0.6.4 wurden unter der MIT-Lizenz veröffentlicht.

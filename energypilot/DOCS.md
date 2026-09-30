@@ -30,7 +30,10 @@ passenden Einstellung. Geprüft werden unter anderem:
 - ob die gewählten Sensoren existieren, die richtige Einheit und eine Langzeitstatistik haben und aktuelle Werte liefern,
 - ob die gemessene Höchstleistung jeder PV-Anlage zur eingetragenen kWp-Leistung passt,
 - ob die **Vorzeichen** stimmen: bei großem PV-Überschuss muss die Netzleistung Einspeisung zeigen und die Batterie laden,
-- ob Aufschlag, Mehrwertsteuer, Einspeisevergütung und Batteriedaten in einem üblichen Bereich liegen.
+- ob Aufschlag, Mehrwertsteuer, Einspeisevergütung und Batteriedaten in einem üblichen Bereich liegen,
+- ob die **Energiebilanz** der letzten 14 Tage aufgeht: PV + Netzbezug − Einspeisung − Hausverbrauch muss
+  ungefähr dem entsprechen, was in den Akku ging, plus dessen Verluste – im Mittel also leicht positiv.
+  Geht sie nicht auf, misst ein Sensor zu viel oder zu wenig oder hat Lücken.
 
 Gibt es Probleme, zeigt das Menü deren Anzahl und die Übersicht einen Hinweis.
 
@@ -106,8 +109,10 @@ der Vorschlag lässt sich mit einem Klick übernehmen.
 ## Verbrauchsprognose
 
 Aus Hausverbrauch minus E-Auto minus Heizstab (Einstellungen › Sensoren) ergibt sich der
-**Grundverbrauch**. Er wird nach Uhrzeit und Wochentag (Mo–Fr, Sa, So) gelernt, jüngere Wochen zählen
-mehr; hängt der Verbrauch erkennbar von der Außentemperatur ab, wird das berücksichtigt. E-Auto und
+**Grundverbrauch**. Er wird nach Uhrzeit für Werktage und für Wochenenden/Feiertage gelernt (bundesweite
+Feiertage des in Home Assistant eingestellten Landes), jüngere Wochen zählen mehr; hängt der Verbrauch
+erkennbar von der Außentemperatur ab, wird das berücksichtigt. Zusätzlich folgt die Prognose zur Hälfte dem
+Verbrauchsniveau der letzten drei Tage – etwa wenn Besuch da ist oder ein neues Gerät läuft. E-Auto und
 Heizstab sind steuerbar und werden später gezielt eingeplant. Vergleichsmaßstab im Prognose-Check
 (Auswahl „Grundverbrauch“) ist „Wie vor einer Woche“.
 
@@ -196,12 +201,19 @@ Rechnung aus Netzbezug und Einspeisung.
 |---|---|
 | Genauigkeit | 100 % minus mittlerer Stundenfehler relativ zur Erzeugung |
 | Tagesabweichung Ø | mittlerer Fehler beim Tagesertrag relativ zum Tagesertrag |
-| Summe | systematische Abweichung: + = Prognose zu hoch, − = zu niedrig |
+| Tendenz | systematische Abweichung: + = Prognose zu hoch, − = zu niedrig |
 | Größter Tagesfehler | der schlechteste Tag im Zeitraum |
 
 **Nach Wetterlage** teilt die Tage anhand der gemessenen Erzeugung im Verhältnis zu einem
 wolkenlosen Tag ein: sonnig ≥ 60 %, wechselhaft 30–60 %, trüb < 30 %. So sieht man, welches Modell
 bei welchem Wetter am besten liegt.
+
+**Entwicklung über die Zeit** zeigt die Genauigkeit der eigenen Prognose Woche für Woche neben dem besten
+Wettermodell (PV) bzw. „Wie vor einer Woche“ (Verbrauch) auf denselben Stunden. Weil das Wetter bestimmt,
+wie schwer eine Woche vorherzusagen ist, zählt der **Vorsprung**: Wächst er, lernt EnergyPilot dazu, schrumpft
+er, wird die eigene Prognose schlechter. Ein Urteil erscheint nur, wenn die Veränderung deutlich größer ist als
+die Schwankung von Woche zu Woche. Vergangene Wochen sind mit dem heutigen Verfahren nachgerechnet – jeweils
+nur mit den Daten, die damals vorlagen.
 
 Mit **Nur gemeinsame Stunden** werden alle Quellen auf denselben Stunden verglichen. Das ist fair,
 wenn Quellen unterschiedlich lange Daten haben, z. B. Forecast.Solar ohne Archiv.

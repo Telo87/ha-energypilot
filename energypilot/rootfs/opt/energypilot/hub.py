@@ -48,6 +48,7 @@ class Hub:
         self.ha = ha
         self.tz = ZoneInfo("Europe/Berlin")
         self.ha_location: tuple[float, float] | None = None
+        self.country: str | None = None
         self.status: dict[str, dict] = {}
         self.live: dict = {"at": None, "values": {}}
         self.backfill = {"running": False, "text": "", "done": 0, "total": 0}
@@ -142,6 +143,7 @@ class Hub:
             return
         if cfg.get("latitude") is not None:
             self.ha_location = (float(cfg["latitude"]), float(cfg["longitude"]))
+        self.country = cfg.get("country") or None
         try:
             self.tz = ZoneInfo(cfg.get("time_zone") or "Europe/Berlin")
             self._midnight.clear()
@@ -669,6 +671,46 @@ class Hub:
             "until": until,
         }
 
+    def energy_balance(self, days: int = 14) -> dict | None:
+        """PV + grid import - export - house consumption per complete day.
+
+        What remains is what went into the battery (or came out of it) plus its
+        losses - over several days small and positive. A clearly negative mean or
+        days far outside the battery size point to a sensor that misses energy,
+        counts twice or has the wrong sign."""
+        s = self.settings.data
+        cfgs = [c for c in s["arrays"] if c["kwp"] > 0]
+        if not cfgs or not all(c.get("sensor") for c in cfgs) or not s["sensors"].get("house"):
+            return None
+        end = self.midnight(int(time.time()))
+        start = end - days * 86400
+        acts: dict[str, dict[int, float]] = defaultdict(dict)
+        for series, t, wh in self.db.actuals(start, end):
+            acts[series][t] = wh
+        sign = self._house_sign(acts)
+        per: dict[str, dict] = {}
+        for t in range(start, end, 3600):
+            g = self._grid_kwh(acts, t)
+            if g is None or t not in acts.get("house", {}):
+                continue
+            d = per.setdefault(self.day_key(t), {"hours": 0, "pv": 0.0, "import": 0.0, "export": 0.0, "house": 0.0})
+            d["hours"] += 1
+            d["import"] += g[0]
+            d["export"] += g[1]
+            d["house"] += max(0.0, acts["house"][t] * sign) / 1000
+            # inverters without a value are asleep (night) - their production is 0
+            d["pv"] += sum(max(0.0, acts.get(c["id"], {}).get(t, 0.0)) for c in cfgs) / 1000
+        out = []
+        for day, d in sorted(per.items()):
+            if d["hours"] < 23:  # incomplete day (23 = switch to summer time)
+                continue
+            rest = d["pv"] + d["import"] - d["export"] - d["house"]
+            out.append({"day": day, **{k: round(v, 2) for k, v in d.items() if k != "hours"}, "rest": round(rest, 2)})
+        if not out:
+            return None
+        return {"days": out, "mean_rest": round(sum(x["rest"] for x in out) / len(out), 2),
+                "mean_house": round(sum(x["house"] for x in out) / len(out), 2)}
+
     def cost_months(self, count: int = 12) -> list[dict]:
         """Totals per calendar month, newest first."""
         today = datetime.now(self.tz).date().replace(day=1)
@@ -823,10 +865,13 @@ class Hub:
         if base:
             self.db.put_actual([(learn.BASE_SERIES, t, round(v, 1)) for t, v in base.items()])
             by_day_load: dict[str, list[learn.LoadHour]] = defaultdict(list)
+            # public holidays count like Sundays; the country comes from Home Assistant (bidding zone as fallback)
+            country = self.country or {"DE-LU": "DE", "AT": "AT", "CH": "CH"}.get(self.settings.data["tariff"]["bidding_zone"])
+            holidays = learn.public_holidays(country, sorted({local[t].year for t in hours}))
             for t in hours:
                 d = local[t]
                 key = d.strftime("%Y-%m-%d")
-                by_day_load[key].append(learn.LoadHour(t, key, d.hour, learn.daytype(d.weekday()), base.get(t)))
+                by_day_load[key].append(learn.LoadHour(t, key, d.hour, learn.daytype(d.weekday(), d.date() in holidays), base.get(t)))
             model_out, naive = learn.load_walk_forward(days, by_day_load, self.daily_temps())
             for horizon in ("d1", "d0"):
                 rows += [(learn.LOAD_SOURCE, learn.BASE_SERIES, t, horizon, round(v, 1), 0) for t, v in model_out.items()]
@@ -1374,6 +1419,43 @@ class Hub:
         }
         self._acc_cache[key] = (time.time(), out)
         return out
+
+    def trend(self, horizon: str, series: str, weeks: int = 13) -> dict:
+        """Accuracy of the own forecast week by week, next to a benchmark.
+
+        The weather decides how hard a week is, so the own forecast is compared
+        with the best weather model (PV) or "like last week" (load) on the same
+        hours: a growing lead means it learns, a shrinking one that it gets worse."""
+        end = self.midnight(int(time.time()))
+        start = end - weeks * 7 * 86400
+        if series == learn.BASE_SERIES:
+            ids, key, bench_pool = [learn.BASE_SERIES], analysis.TOTAL, [learn.NAIVE_SOURCE]
+        else:
+            ids = [c["id"] for c in self.settings.arrays if c["kwp"] > 0 and c.get("sensor")]
+            key = series
+            bench_pool = None
+        ds = analysis.Dataset(self.db.forecasts(start, end, horizon), self.db.actuals(start, end), ids, self.tz)
+        if bench_pool is None:  # the weather source that was best over the whole period
+            ranked = [r for r in analysis.evaluate(ds, key) if r["source"] not in learn.LEARNED_SOURCES]
+            bench_pool = [ranked[0]["source"]] if ranked else []
+        sources = [s for s in (learn.PV_SOURCE, *bench_pool) if s in ds.fc]
+        pairs = {s: ds.pairs(s, key) for s in sources}
+        day_totals = {s: ds.days(s, key) for s in sources}
+        out = []
+        for w in range(weeks):
+            a, b = start + w * 7 * 86400, start + (w + 1) * 7 * 86400
+            common = set.intersection(*({t for t in p if a <= t < b} for p in pairs.values())) if pairs else set()
+            if len(common) < 20:
+                continue
+            vals = {}
+            for s in sources:
+                sel = {t: pairs[s][t] for t in common}
+                days = {d: v for d, v in day_totals[s].items() if a <= analysis.day_start(d, self.tz) < b}
+                m = analysis.metrics(sel, days)
+                vals[s] = {"score": round(m["score"], 1) if m["score"] is not None else None,
+                           "day_nmae_pct": round(m["day_nmae_pct"], 1) if m["day_nmae_pct"] is not None else None}
+            out.append({"start": a, "hours": len(common), "values": vals})
+        return {"weeks": out, "sources": sources, "labels": {s: source_label(s) for s in sources}}
 
     def best_source(self) -> str | None:
         acc = self.accuracy(30, "d1", analysis.TOTAL, False)

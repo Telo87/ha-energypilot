@@ -220,6 +220,31 @@ async def run(hub: Hub) -> dict:
                               f"Gerade {surplus_now:.0f} W PV-Überschuss bei {soc:.0f} % Ladezustand, die Batterie zeigt aber Entladen ({bp:.0f} W) – „Richtung umkehren“ ändern.", LINK["sensors"]))
             elif bp > 200:
                 sen.append(_c("ok", "Vorzeichen der Batterie-Leistung plausibel", "Bei PV-Überschuss zeigt sie Laden."))
+    # energy balance: PV + import - export - house = into the battery + losses
+    bal = hub.energy_balance(14)
+    if bal and len(bal["days"]) >= 5:
+        cap = float(bat["capacity_kwh"]) if sensors.get("battery_soc") else 0.0
+        tol = 1.5 + 0.05 * bal["mean_house"]  # meters are never exact
+        odd = [d for d in bal["days"] if not -cap - tol <= d["rest"] <= cap + tol + 2]
+        mean = bal["mean_rest"]
+        days_txt = f"{len(bal['days'])} Tage geprüft"
+        if mean < -tol:
+            sen.append(_c("warn", "Energiebilanz geht nicht auf",
+                          f"Im Mittel werden {-mean:.1f} kWh am Tag mehr verbraucht, als PV und Netz liefern ({days_txt}). "
+                          "Misst der Hausverbrauch-Sensor zu viel (z. B. doppelt gezählt) oder fehlt ein PV- oder Netzbezug-Wert?", LINK["sensors"]))
+        elif mean > tol + (3.0 if cap else 0.0):
+            sen.append(_c("warn", "Energiebilanz geht nicht auf",
+                          f"Im Mittel fehlen {mean:.1f} kWh am Tag im Hausverbrauch ({days_txt}) – mehr als {'Akkuverluste erklären' if cap else 'Messungenauigkeit erklärt'}. "
+                          "Erfasst der Hausverbrauch-Sensor wirklich alles (auch E-Auto und Heizstab) und stimmt das Vorzeichen der Netzleistung?", LINK["sensors"]))
+        elif odd:
+            sen.append(_c("warn", "Energiebilanz an einzelnen Tagen auffällig",
+                          f"{', '.join(datetime.strptime(d['day'], '%Y-%m-%d').strftime('%d.%m.') for d in odd[-5:])}: Die Abweichung ist größer, als der Akku speichern kann – "
+                          "vermutlich fehlen dort Messwerte eines Sensors.", LINK["sensors"]))
+        else:
+            sen.append(_c("ok", "Energiebilanz stimmt",
+                          f"PV + Netzbezug − Einspeisung − Hausverbrauch: im Mittel {mean:+.1f} kWh am Tag ({days_txt})"
+                          + (" – das sind Lade- und Entladeverluste des Akkus." if cap and mean > 0 else ".")))
+
     # EV / heater gaps
     for key, series, label in (("ev", "ev", "E-Auto"), ("heater", "heater", "Heizstab")):
         if sensors.get(key) and house:

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0
+
+- Lizenz: ab dieser Version PolyForm Strict 1.0.0 (nicht-kommerzielle Nutzung erlaubt, keine Weitergabe oder Veränderung); bis 0.6.4 MIT
+- Prognose-Check: neue Karte **„Entwicklung über die Zeit“** – Genauigkeit der eigenen Prognose Woche für Woche neben dem besten Wettermodell bzw. „Wie vor einer Woche“, mit dem Vorsprung am Anfang und zuletzt und einem Urteil („lernt dazu“, „wird schlechter“, „keine klare Veränderung“), das nur erscheint, wenn die Veränderung größer ist als die Schwankung von Woche zu Woche
+- Verbrauchsprognose genauer: Werktage und Wochenenden/Feiertage statt Mo–Fr/Sa/So, und die Prognose folgt zur Hälfte dem Verbrauchsniveau der letzten drei Tage. An echten Daten (30 Tage) sank der Fehler je Stunde von 32,7 auf 31,1 %, je Tag von 18,2 auf 17,1 %. Bundesweite Feiertage (DE, AT, CH) zählen wie Sonntage
+- Einrichtung: neue Prüfung der **Energiebilanz** der letzten 14 Tage (PV + Netzbezug − Einspeisung − Hausverbrauch) – erkennt Sensoren, die zu viel oder zu wenig messen oder Lücken haben
+- Planung: Endet der Plan heute um 24:00, weil die Preise für morgen noch fehlen, steht dabei „Preise für morgen ab ca. 13 Uhr“
+
 ## 0.6.4
 
 - Einstellungen › Strompreis: Der Vergleich mit einem anderen Tarif lässt sich ein- und ausschalten. Ausgeschaltet verschwinden Vergleichs-Kennzahl, Linie, Spalten und die Freistrom-Karte von der Kosten-Seite; die eingetragenen Werte bleiben gespeichert

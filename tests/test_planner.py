@@ -385,3 +385,24 @@ def test_comparison_can_be_switched_off(tmp_path):
     res = hub.costs(t, t + 3600)
     assert res["totals"]["savings_eur"] is None and res["flat"] is None
     assert res["tariff"]["compare_enabled"] is False
+
+
+def test_energy_balance_finds_a_missing_consumer(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"sensors": {"house": "sensor.house", "grid": "sensor.grid"}})
+    settings.upsert_array({"name": "Dach", "planes": [{"kwp": 5}], "sensor": "sensor.pv"})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    aid = hub.settings.arrays[0]["id"]
+    end = hub.midnight(int(time.time()))
+    rows = []
+    for d in range(7):
+        day0 = hub.midnight(end - (d + 1) * 86400 + 7200)
+        for h in range(24):
+            t = day0 + h * 3600
+            pv = 2000.0 if 10 <= h < 16 else 0.0
+            rows += [(aid, t, pv), ("house", t, 500.0), ("grid", t, 500.0 - pv)]  # no battery: balances exactly
+    hub.db.put_actual(rows)
+    bal = hub.energy_balance(7)
+    assert len(bal["days"]) == 7 and abs(bal["mean_rest"]) < 0.01
+    hub.db.put_actual([("house", t, 300.0) for _a, t, _v in rows[::3]])  # house sensor now misses 200 W
+    assert hub.energy_balance(7)["mean_rest"] == pytest.approx(4.8, abs=0.01)

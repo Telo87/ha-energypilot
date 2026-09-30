@@ -610,7 +610,9 @@
     };
     const draw = (p, ov) => {
       const nc = p.nowcast && p.nowcast.factor && Math.abs(p.nowcast.factor - 1) >= 0.05 ? ` · live korrigiert (${signed((p.nowcast.factor - 1) * 100, 0)} %)` : '';
-      setHeader('Planung', p.ok ? `Plan bis ${fmtWhen(p.horizon_end, true)} · PV: ${esc(p.pv_source || 'Open-Meteo Auto')}${nc} · Verbrauch: ${esc(p.load_source)}` : '', refreshBtn());
+      // before about 13:00 the prices of tomorrow are not published yet - that is why the plan is shorter then
+      const noTomorrow = p.ok && p.horizon_end <= dayTs(shiftDay(localDay(), 1));
+      setHeader('Planung', p.ok ? `Plan bis ${fmtWhen(p.horizon_end, true)}${noTomorrow ? ' <span class="faint">(Preise für morgen ab ca. 13 Uhr)</span>' : ''} · PV: ${esc(p.pv_source || 'Open-Meteo Auto')}${nc} · Verbrauch: ${esc(p.load_source)}` : '', refreshBtn());
       bindRefresh(load);
       if (!p.ok && !p.runtime) {
         el.innerHTML = `<div class="card"><div class="card-body">${empty('battery', 'Noch kein Plan', esc(p.reason || ''), `<a class="btn primary" href="#/settings?tab=sensors">${ic('gear')}Sensoren einstellen</a> <a class="btn" href="#/settings?tab=battery">Batterie einstellen</a>`)}</div></div>`;
@@ -784,9 +786,37 @@
     if (!arrays.length) { welcome(el); return; }
     const load = async () => {
       store.set('acc', cfg);
-      const data = await api(`accuracy?days=${cfg.days}&horizon=${cfg.horizon}&series=${encodeURIComponent(cfg.series)}&common=${cfg.common ? 1 : 0}`);
+      const [data, tr] = await Promise.all([
+        api(`accuracy?days=${cfg.days}&horizon=${cfg.horizon}&series=${encodeURIComponent(cfg.series)}&common=${cfg.common ? 1 : 0}`),
+        api(`trend?horizon=${cfg.horizon}&series=${encodeURIComponent(cfg.series)}`).catch(() => null),
+      ]);
       if (stale(token)) return;
+      trendData = tr;
       draw(data);
+    };
+    let trendData = null;
+    // how the own forecast develops week by week - its lead over the benchmark is what counts
+    const trendCard = (isLoad) => {
+      const tr = trendData;
+      if (!tr || !tr.weeks.length || !tr.sources.includes('ep')) return '';
+      const bench = tr.sources.find((s) => s !== 'ep');
+      const lead = tr.weeks.map((w) => (bench && w.values.ep.score != null && w.values[bench].score != null ? w.values.ep.score - w.values[bench].score : null));
+      const avg = (arr) => { const v = arr.filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+      const n = Math.min(4, Math.floor(tr.weeks.length / 2));
+      const early = n ? avg(lead.slice(0, n)) : null; const late = n ? avg(lead.slice(-n)) : null;
+      const epEarly = n ? avg(tr.weeks.slice(0, n).map((w) => w.values.ep.score)) : null; const epLate = n ? avg(tr.weeks.slice(-n).map((w) => w.values.ep.score)) : null;
+      const change = early != null && late != null ? late - early : null;
+      // a verdict only when the change is clearly larger than the week-to-week noise of the lead
+      const vr = (arr) => { const v = arr.filter((x) => x != null); const m = avg(v); return v.length > 1 ? v.reduce((a, x) => a + (x - m) ** 2, 0) / (v.length - 1) : 0; };
+      const se = n ? Math.sqrt(vr(lead.slice(0, n)) / n + vr(lead.slice(-n)) / n) : 0;
+      const clear = change != null && Math.abs(change) > Math.max(1, 2 * se);
+      const verdict = change == null ? '' : !clear ? '<span class="badge" title="Die Veränderung ist kleiner als die Schwankung von Woche zu Woche">keine klare Veränderung</span>'
+        : change > 0 ? `<span class="badge ok">${ic('checkCircle')}lernt dazu</span>` : `<span class="badge err">${ic('alert')}wird schlechter</span>`;
+      return `<div class="card"><div class="card-head"><h2>Entwicklung über die Zeit <span class="sub">Genauigkeit je Woche · ${cfg.horizon === 'd1' ? 'Prognose vom Vortag' : 'kurzfristig'}</span></h2>${verdict}</div>
+        <div class="card-body">${bench ? `<p class="explain">Vorsprung der eigenen Prognose vor ${esc(tr.labels[bench])}: ${early == null ? '–' : `<b>${signed(early, 1)} Prozentpunkte</b> in den ersten ${n} Wochen`} → ${late == null ? '–' : `<b>${signed(late, 1)} Prozentpunkte</b> in den letzten ${n} Wochen`}. EnergyPilot selbst: ${pct(epEarly, 0)} → ${pct(epLate, 0)}.</p>` : ''}
+          <div class="legend">${tr.sources.map((s) => `<span class="static"><i style="background:${srcColor(s)}"></i>${esc(tr.labels[s])}</span>`).join('')}</div>
+          <div class="chart" id="trendChart"></div>
+          <p class="faint" style="font-size:12.5px;margin:10px 0 0">Wie gut eine Woche vorhergesagt werden kann, hängt stark vom Wetter${isLoad ? ' und vom Alltag' : ''} ab – deshalb der Vergleich auf denselben Stunden mit ${bench ? esc(tr.labels[bench]) : 'einem Maßstab'}. Wächst der Vorsprung, lernt EnergyPilot dazu; schrumpft er, wird die eigene Prognose schlechter. Vergangene Wochen sind mit dem heutigen Verfahren nachgerechnet – jeweils nur mit den Daten, die damals schon vorlagen.</p></div></div>`;
     };
     const toolbar = () => `${seriesSelect('accSeries', cfg.series, arrays)}<div class="toolbar">
         <span class="tb-label">Zeitraum</span><div class="seg" id="accDays">${[[7, '7 Tage'], [14, '14 Tage'], [30, '30 Tage'], [90, '90 Tage'], [365, '1 Jahr']].map(([d, l]) => `<button data-v="${d}" class="${cfg.days === d ? 'active' : ''}">${l}</button>`).join('')}</div>
@@ -834,10 +864,20 @@
           <div class="card-body flush"><p class="explain" style="padding:0 18px">${ic('trophy')} Am genauesten: <b>${esc(res[0].label)}</b> – Genauigkeit ${pct(res[0].score, 1)}, beim ${what} im Mittel ${pct(res[0].day_nmae_pct)} daneben.
             <span class="faint">Sortiert nach Genauigkeit = 100 % minus mittlerer Fehler je Stunde relativ zum Messwert – für die Planung zählt jede Stunde. Tagesabweichung = Fehler beim ${what}; dort kann eine andere Quelle vorn liegen, weil sich Fehler über den Tag ausgleichen. Tendenz = systematische Über- (+) oder Unterschätzung.${isLoad ? ' Grundverbrauch = Hausverbrauch ohne E-Auto und Heizstab; „Wie vor einer Woche“ ist der Vergleichsmaßstab.' : ''}</span></p>
           <div class="table-wrap"><table class="table"><thead><tr><th></th><th>Quelle</th><th>Genauigkeit</th><th class="num">Tagesabw. Ø</th><th class="num">Tendenz</th><th class="num">Größter Tagesfehler</th><th class="num hide-md">Stundenfehler Ø</th><th class="num hide-md">RMSE</th><th class="num">Tage</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
+        ${trendCard(isLoad)}
         ${isLoad ? '' : modelCard(d.model)}
         ${classTable}
         <div class="card"><div class="card-head"><h2>${isLoad ? 'Tagesverbrauch' : 'Tageserträge'} <span class="sub">Klick auf einen Tag zeigt den Stundenverlauf</span></h2></div>
           <div class="card-body">${legendHTML(MEASURED, lines, hidden)}<div class="chart tall" id="dailyChart"></div></div></div>`;
+      if ($('#trendChart')) {
+        const tr = trendData;
+        chart($('#trendChart'), {
+          xs: tr.weeks.map((w) => w.start), step: 7 * 86400, height: 220, tickCenter: true,
+          lines: tr.sources.map((s) => ({ key: s, label: tr.labels[s], color: srcColor(s), values: tr.weeks.map((w) => w.values[s].score) })),
+          fmt: (v) => pct(v, 1), axisFmt: (v) => `${nf(v)} %`, maxY: 100,
+          head: (ts) => `Woche ab ${fmtDay(ts)}`, tick: (ts) => new Date(ts * 1000).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }),
+        });
+      }
       const days = d.daily.days;
       chart($('#dailyChart'), {
         xs: days.map(dayTs), step: 86400, height: 280,

@@ -112,6 +112,13 @@ async def accuracy(request: web.Request) -> web.Response:
     )
 
 
+@routes.get("/api/trend")
+async def trend(request: web.Request) -> web.Response:
+    hub = _hub(request)
+    horizon = request.query.get("horizon") if request.query.get("horizon") in ("d0", "d1") else "d1"
+    return _ok(await asyncio.to_thread(hub.trend, horizon, _series(request.query.get("series"), hub)))
+
+
 @routes.get("/api/prices")
 async def price_view(request: web.Request) -> web.Response:
     hub = _hub(request)

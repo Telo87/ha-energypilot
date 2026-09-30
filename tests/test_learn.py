@@ -110,3 +110,53 @@ def test_hour_factors_for_display():
     f = model.hour_factors()
     assert set(f) == {"sunny", "cloudy"}
     assert f["sunny"][8] < 0.7
+
+
+def test_public_holidays_and_day_types():
+    from datetime import date
+
+    hol = learn.public_holidays("DE", [2026])
+    assert date(2026, 4, 3) in hol and date(2026, 4, 6) in hol  # Good Friday, Easter Monday (Easter: 5 April)
+    assert date(2026, 10, 3) in hol and date(2026, 5, 14) in hol  # Unity Day, Ascension
+    assert learn.public_holidays(None, [2026]) == set()
+    assert learn.daytype(2) == 0 and learn.daytype(5) == 1 and learn.daytype(6) == 1 and learn.daytype(2, True) == 1
+
+
+def test_load_forecast_follows_the_recent_level():
+    # 30 days at 500 Wh per hour, the last 3 days at 800 Wh: tomorrow is pulled half-way up
+    days = [f"2026-06-{d:02d}" for d in range(1, 31)] + ["2026-07-01"]
+    by_day = {}
+    for n, key in enumerate(days):
+        v = None if key == "2026-07-01" else (800.0 if n >= 27 else 500.0)
+        by_day[key] = [learn.LoadHour(n * 86400 + h * 3600, key, h, 0, v) for h in range(24)]
+    model, _naive = learn.load_walk_forward(["2026-07-01"], by_day, {})
+    v = model[30 * 86400 + 12 * 3600]
+    assert 580 < v < 700  # profile ~560 (recent days weigh more), level factor about 1.2
+
+
+def test_trend_compares_own_forecast_with_benchmark_per_week(tmp_path):
+    import time
+
+    from energypilot.config import Options, Settings
+    from energypilot.db import Database
+    from energypilot.ha import HomeAssistant
+    from energypilot.hub import Hub
+
+    settings = Settings(tmp_path / "s.json")
+    settings.upsert_array({"name": "Dach", "planes": [{"kwp": 5}], "sensor": "sensor.pv"})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    aid = hub.settings.arrays[0]["id"]
+    end = hub.midnight(int(time.time()))
+    rows, fc = [], []
+    for d in range(28):
+        for h in range(8, 17):
+            t = end - (d + 1) * 86400 + h * 3600
+            rows.append((aid, t, 1000.0))
+            fc.append(("om:best_match", aid, t, "d1", 1300.0, 0))  # weather model 30 % too high
+            fc.append(("ep", aid, t, "d1", 1000.0 + (100.0 if d >= 14 else 20.0), 0))  # own forecast: better recently (d counts back)
+    hub.db.put_actual(rows)
+    hub.db.put_forecast(fc)
+    tr = hub.trend("d1", "_total", weeks=4)
+    assert tr["sources"] == ["ep", "om:best_match"] and len(tr["weeks"]) == 4
+    first, last = tr["weeks"][0]["values"], tr["weeks"][-1]["values"]
+    assert first["ep"]["score"] == 90 and last["ep"]["score"] == 98 and last["om:best_match"]["score"] == 70

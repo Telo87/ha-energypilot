@@ -19,8 +19,10 @@ PV ("ep"), per array:
    same weather situation.
 
 Base load ("ep" on series "base"): household consumption without EV and
-heating rod - profile per hour and day type with recent weeks weighted more,
-corrected by the day's mean temperature if consumption depends on it.
+heating rod - profile per hour for working days and for weekends/public
+holidays with recent weeks weighted more, corrected by the day's mean
+temperature if consumption depends on it, and pulled half-way towards the
+level of the last three days (tuned on real data: both lowered the error).
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 PV_SOURCE = "ep"
 LOAD_SOURCE = "ep"
@@ -51,6 +54,9 @@ CLEAR_MARGIN = 1.2  # a forecast never exceeds the clear-sky value by more than 
 BAND_Q = (0.1, 0.9)
 LOAD_TRAIN_DAYS = 28
 LOAD_HALF_LIFE = 14.0  # days
+LOAD_LEVEL = 0.5  # share of the recent level taken over (1 = fully)
+LOAD_LEVEL_DAYS = 3
+LOAD_LEVEL_RANGE = (0.7, 1.4)
 BUCKETS = ("sunny", "mixed", "cloudy")
 
 
@@ -248,12 +254,41 @@ class LoadHour:
     t: int
     day: str
     hour: int
-    daytype: int  # 0 = Mon–Fri, 1 = Sat, 2 = Sun
+    daytype: int  # 0 = working day, 1 = weekend or public holiday
     actual: float | None
 
 
-def daytype(weekday: int) -> int:
-    return 0 if weekday < 5 else 1 if weekday == 5 else 2
+def daytype(weekday: int, holiday: bool = False) -> int:
+    """Two day types: separate Saturday / Sunday profiles had too little data and were less accurate."""
+    return 1 if holiday or weekday >= 5 else 0
+
+
+def _easter(y: int) -> date:
+    a, b, c = y % 19, y // 100, y % 100
+    d, e = b // 4, b % 4
+    g = (b - (b + 8) // 25 + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7  # noqa: E741
+    m = (a + 11 * h + 22 * l) // 451
+    return date(y, (h + l - 7 * m + 114) // 31, (h + l - 7 * m + 114) % 31 + 1)
+
+
+def public_holidays(country: str | None, years: list[int]) -> set[date]:
+    """Nationwide public holidays (regional ones differ too much to guess)."""
+    out: set[date] = set()
+    for y in years:
+        e = _easter(y)
+        if country == "DE":
+            out |= {date(y, 1, 1), e - timedelta(2), e + timedelta(1), date(y, 5, 1), e + timedelta(39),
+                    e + timedelta(50), date(y, 10, 3), date(y, 12, 25), date(y, 12, 26)}
+        elif country == "AT":
+            out |= {date(y, 1, 1), date(y, 1, 6), e + timedelta(1), date(y, 5, 1), e + timedelta(39), e + timedelta(50),
+                    e + timedelta(60), date(y, 8, 15), date(y, 10, 26), date(y, 11, 1), date(y, 12, 8),
+                    date(y, 12, 25), date(y, 12, 26)}
+        elif country == "CH":
+            out |= {date(y, 1, 1), e + timedelta(39), date(y, 8, 1), date(y, 12, 25)}
+    return out
 
 
 class LoadModel:
@@ -325,11 +360,23 @@ def load_walk_forward(
     for day in days:
         past = [d for d in ordered if d < day and d in by_day][-LOAD_TRAIN_DAYS:]
         model = LoadModel([h for d in past for h in by_day[d]], temps, index)
+        # how the last days ran compared with the model (a guest, holidays, a new appliance ...)
+        level = 1.0
+        if model.ready:
+            act = pred = 0.0
+            for d in past[-LOAD_LEVEL_DAYS:]:
+                for h in by_day[d]:
+                    v = model.predict(h, temps.get(d)) if h.actual is not None else None
+                    if v is not None:
+                        act += h.actual
+                        pred += v
+            if pred > 0:
+                level = 1 + LOAD_LEVEL * (min(LOAD_LEVEL_RANGE[1], max(LOAD_LEVEL_RANGE[0], act / pred)) - 1)
         for h in by_day.get(day, []):
             if model.ready:
                 v = model.predict(h, temps.get(day))
                 if v is not None:
-                    model_out[h.t] = v
+                    model_out[h.t] = v * level
             week_ago = actual.get(h.t - 7 * 86400)
             if week_ago is not None:
                 naive_out[h.t] = week_ago
