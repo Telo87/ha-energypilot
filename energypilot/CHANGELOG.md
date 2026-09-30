@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.9
+
+- Planung: Ruht der Akku, steht statt „aus PV oder Netz“ konkret da, woher der Strom gerade kommt – z. B. „PV deckt den Verbrauch – 1,20 kW Überschuss gehen ins Netz“ oder „900 W aus PV, 600 W aus dem Netz“
+
 ## 0.5.8
 
 - Tagesverlauf und Prognose-Check: Die Umschaltung „Auswertung für“ (Anlagen / Grundverbrauch) steht als eigene, hervorgehobene Leiste über den Filtern; Tag, Zeitraum und Prognose sind beschriftet

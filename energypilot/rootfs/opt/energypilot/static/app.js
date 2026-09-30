@@ -584,6 +584,15 @@
     });
   }
 
+  // where the power comes from while the battery rests – from the live values
+  function coverText(lv) {
+    const pv = Object.entries(lv).filter(([k, v]) => k.startsWith('pv:') && v && v.unit === 'W' && v.value != null).reduce((a, [, v]) => a + Math.max(0, v.value), 0);
+    const grid = lv.grid && lv.grid.value;
+    if (grid != null && grid > 50) return pv > 50 ? `Verbrauch: ${fmtW(pv)} aus PV, ${fmtW(grid)} aus dem Netz` : `Verbrauch kommt aus dem Netz (${fmtW(grid)})`;
+    if (pv > 50) return grid != null && grid < -50 ? `PV deckt den Verbrauch – ${fmtW(-grid)} Überschuss gehen ins Netz` : `PV deckt den Verbrauch (${fmtW(pv)})`;
+    return 'der Verbrauch wird ohne Akku gedeckt';
+  }
+
   // how the last hour compares with the forecast (drives the correction of the next hours)
   function nowcastText(plan) {
     const n = plan && plan.nowcast;
@@ -624,7 +633,7 @@
         <div class="grid kpis">
           ${kpi('battery', 'ok', 'Akku jetzt', `${cnt('psoc', nf(p.soc, 0))}<small>%</small>`, `${nf(rt.usable_kwh, 1)} kWh nutzbar bis zur Reserve von ${nf(p.battery.min_soc, 0)} %`)}
           ${rt.state === 'charging' ? kpi('clock', 'ok', 'Akku lädt', `<span class="kpi-text">mit ${esc(fmtW(rt.battery_w))}</span>`, rt.full_at ? `voll voraussichtlich ${fmtWhen(rt.full_at)}` : 'Reichweite wird angezeigt, sobald er entlädt')
-            : rt.state === 'idle' ? kpi('clock', '', p.soc >= 99 ? 'Akku voll' : 'Akku ruht', '<span class="kpi-text">entlädt nicht</span>', 'der Verbrauch wird gerade aus PV oder Netz gedeckt')
+            : rt.state === 'idle' ? kpi('clock', '', p.soc >= 99 ? 'Akku voll' : 'Akku ruht', '<span class="kpi-text">entlädt nicht</span>', coverText(lv))
               : kpi('clock', 'warn', 'Reichweite', rt.now_hours != null ? esc(fmtDur(rt.now_hours)) : '–', rt.state === 'discharging' ? `bei der aktuellen Entladeleistung von ${fmtW(-rt.battery_w)}` : house ? `beim aktuellen Verbrauch von ${fmtW(house)}` : 'Hausverbrauch-Sensor fehlt')}
           ${kpi('sun', 'up', 'Akku leer (Prognose)', `<span class="kpi-text">${rt.empty_at ? esc(fmtWhen(rt.empty_at)) : `nicht vor ${esc(fmtWhen(rt.until, true))}`}</span>`, rt.empty_at ? (rt.full_at && rt.full_at > rt.empty_at ? `wieder voll ${fmtWhen(rt.full_at)}` : 'mit PV-Erzeugung und Verbrauchsprognose') : rt.full_at ? `voll ${fmtWhen(rt.full_at)} · reicht bis ${fmtWhen(rt.until, true)}` : `bis ${fmtWhen(rt.until, true)}`)}
           ${kpi('home', '', 'Verbrauch (Prognose)', `${nf(loadSum(0, tomorrowTs), 1)}<small>kWh</small>`, `bis Mitternacht · morgen ${nf(loadSum(tomorrowTs, afterTs), 1)} kWh · ohne E-Auto/Heizstab`)}
