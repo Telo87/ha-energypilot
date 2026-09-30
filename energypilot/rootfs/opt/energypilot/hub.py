@@ -1193,14 +1193,27 @@ class Hub:
                 "detail": hours_detail,
             }
             if usable:
-                hrs = [planner.Hour(t, pv_of(t) / 1000, sim_load[t] / 1000, price(t)) for t in usable]
-                soc0 = cap * float(logs[usable[0]][7] or 0) / 100
-                ev = planner.end_price(hrs, b)
-                base = planner.simulate(hrs, soc0, b, feed_in, end_value=ev)
-                modes = [logs[t][1] for t in usable]
-                targets = [cap * float(logs[t][6] or 0) / 100 for t in usable]
-                followed = planner.simulate(hrs, soc0, b, feed_in, modes, targets, end_value=ev)
-                best = planner.optimize(hrs, soc0, b, feed_in)
+                # gaps (add-on restarted or updated) split the day: every stretch starts with the battery
+                # level measured at its beginning - running on across a gap would invent a battery state
+                segments: list[list[int]] = []
+                for t in usable:
+                    if segments and t - segments[-1][-1] == 3600:
+                        segments[-1].append(t)
+                    else:
+                        segments.append([t])
+                base, followed, best = planner.Plan(), planner.Plan(), planner.Plan()
+                for seg in segments:
+                    hrs = [planner.Hour(t, pv_of(t) / 1000, sim_load[t] / 1000, price(t)) for t in seg]
+                    soc0 = cap * float(logs[seg[0]][7] or 0) / 100
+                    ev = planner.end_price(hrs, b)
+                    modes = [logs[t][1] for t in seg]
+                    targets = [cap * float(logs[t][6] or 0) / 100 for t in seg]
+                    for total, part in ((base, planner.simulate(hrs, soc0, b, feed_in, end_value=ev)),
+                                        (followed, planner.simulate(hrs, soc0, b, feed_in, modes, targets, end_value=ev)),
+                                        (best, planner.optimize(hrs, soc0, b, feed_in))):
+                        total.steps += part.steps
+                        total.cost += part.cost
+                entry["segments"] = len(segments)
                 bills = {k: sim_bill(pl, absorb(pl)) for k, pl in (("base", base), ("plan", followed), ("best", best))}
                 # the real bill over the same hours, from the measured grid energy
                 grid = {t: self._grid_kwh(acts, t) for t in usable}

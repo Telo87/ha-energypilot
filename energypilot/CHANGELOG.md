@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.2
+
+- Behoben (Protokoll): Fehlten zwischendurch Empfehlungen (Neustart oder Update des Add-ons), rechnete die Nachrechnung über die Lücke hinweg mit einem erfundenen Akkustand weiter – z. B. mit einem halb leeren Akku, der in Wirklichkeit längst voll war. Jetzt beginnt jeder zusammenhängende Abschnitt mit dem gemessenen Ladezustand; die Tagesansicht nennt die Anzahl der Abschnitte. An echten Daten stimmt die Nachrechnung damit fast genau mit der Messung überein (Einspeisung 5,3 statt 0,8 kWh, gemessen 5,4 kWh)
+
 ## 0.7.1
 
 - Übersicht, Karte Akku: Die Vorhersage ist als solche gekennzeichnet – „lädt mit 302 W · Prognose: leer morgen um 08:47“ statt „reicht bis morgen 08:47“, sonst „Prognose: reicht über … hinaus“

@@ -406,3 +406,22 @@ def test_energy_balance_finds_a_missing_consumer(tmp_path):
     assert len(bal["days"]) == 7 and abs(bal["mean_rest"]) < 0.01
     hub.db.put_actual([("house", t, 300.0) for _a, t, _v in rows[::3]])  # house sensor now misses 200 W
     assert hub.energy_balance(7)["mean_rest"] == pytest.approx(4.8, abs=0.01)
+
+
+def test_journal_restarts_the_battery_after_a_gap(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"location": {"latitude": 52, "longitude": 9}, "sensors": {"house": "sensor.house", "grid": "sensor.grid"}})
+    settings.upsert_array({"name": "Dach", "planes": [{"kwp": 8}], "sensor": "sensor.pv"})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    aid = hub.settings.arrays[0]["id"]
+    day0 = hub.midnight(int(time.time())) - 86400
+    # 9-10 o'clock with an empty battery, gap (restart), 13-14 o'clock: battery measured full
+    for h, soc in ((9, 10.0), (10, 30.0), (13, 100.0), (14, 100.0)):
+        t = day0 + h * 3600
+        hub.db.log_plan((t, "normal", 30.0, 3.0, 0.5, soc, soc, soc, t))
+        hub.db.put_actual([(aid, t, 3500.0), ("house", t, 500.0), ("grid", t, -3000.0 if soc == 100.0 else 0.0)])
+        hub.db.put_prices([(t + q * 900, 900, 100.0) for q in range(4)])
+    day = next(d for d in hub.journal(days=3)["days"] if d["hours"])
+    assert day["segments"] == 2
+    # the full battery after the gap cannot take the surplus: it is fed in, like measured
+    assert day["bills"]["base"]["export_kwh"] == pytest.approx(6.0, abs=0.01)
