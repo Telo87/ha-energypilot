@@ -560,3 +560,20 @@ def test_diagnostic_export_contains_data_but_no_secret(tmp_path):
     assert json.loads(z.read("state.json"))["location"] == [52.1234, 9.5678]  # exact
     (tmp_path / "copy.db").write_bytes(z.read("energypilot.db"))
     assert sqlite3.connect(tmp_path / "copy.db").execute("SELECT COUNT(*) FROM actual").fetchone()[0] == 1
+
+
+def test_journal_includes_the_grid_floor_of_the_storage(tmp_path):
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"location": {"latitude": 52, "longitude": 9}, "sensors": {"house": "sensor.house", "grid": "sensor.grid"}})
+    settings.upsert_array({"name": "Dach", "planes": [{"kwp": 5}], "sensor": "sensor.pv"})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    day0 = hub.midnight(int(time.time())) - 86400
+    for h in range(8):  # night, battery at 60 %, the storage still draws 30 Wh per hour
+        t = day0 + h * 3600
+        hub.db.log_plan((t, "normal", 30.0, 0.0, 0.4, 60.0, 56.0, 60.0 - h, t))
+        hub.db.put_actual([("house", t, 400.0), ("grid", t, 30.0)])
+        hub.db.put_prices([(t + q * 900, 900, 100.0) for q in range(4)])
+    j = hub.journal(days=3)
+    assert j["grid_floor_wh"] == 30
+    day = next(d for d in j["days"] if d["hours"])
+    assert day["bills"]["base"]["import_kwh"] == pytest.approx(day["bills"]["real"]["import_kwh"], abs=0.01)

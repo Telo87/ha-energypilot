@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.1
+
+Aus der Auswertung eines Diagnose-Exports:
+
+- Behoben (Preise): Lieferte die Ersatzquelle für einen Tag Stundenpreise, lagen sie auf den Viertelstundenpreisen desselben Tages (ein Tag mit 42 statt 24 Stunden – doppelte Balken, verzerrte Durchschnitte). Ein neuer Preis ersetzt jetzt alle Einträge, mit denen er sich überschneidet; vorhandene Überschneidungen werden beim Start bereinigt
+- PV-Prognose: Die Unsicherheitsspanne war zu schmal – an echten Daten lag die Erzeugung nur in 72 % der Stunden darin statt in 80 %. Sie ist jetzt so eingestellt, dass es 80 % sind (nachgeprüft: 79 %)
+- Protokoll: Viele Speicher beziehen auch bei geladenem Akku ständig etwas Strom aus dem Netz (Regelung, Eigenverbrauch). EnergyPilot misst diesen Grundbezug in dunklen Stunden mit geladenem Akku und berücksichtigt ihn in der Nachrechnung – an echten Daten liegt „ohne EnergyPilot“ damit bei −0,15 € statt −0,44 € gegenüber gemessenen −0,23 €. Die Tagesansicht nennt den Wert
+- Die Leistung des Akkus wird jetzt auch als Verlauf gespeichert (rückwirkend aus der Statistik) – damit lassen sich Wirkungsgrad und tatsächliche Lade- und Entladeleistung auswerten
+
 ## 0.9.0
 
 - Einrichtung: neuer Knopf **„Diagnose-Export“** – lädt eine ZIP-Datei mit der Datenbank (alle Prognosen, Messwerte, Preise, Protokoll), den Einstellungen ohne Solcast-Schlüssel und dem aktuellen Zustand (Plan mit Erklärung, Live-Werte, gelernte Gewichte, Status, Einrichtungsprüfung). Damit lassen sich Prognosen, Lernen, Planung und Protokoll außerhalb von Home Assistant genau nachrechnen

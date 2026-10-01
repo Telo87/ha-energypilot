@@ -215,3 +215,14 @@ def test_band_is_not_a_source_but_weather_models_are():
     fc = [("om:icon_d2", "a", 0, 100.0), ("ep", "a", 0, 90.0), ("ep:lo", "a", 0, 50.0), ("ep:hi", "a", 0, 120.0)]
     ds = analysis.Dataset(fc, [("a", 0, 95.0)], ["a"], TZ)
     assert ds.sources == ["ep", "om:icon_d2"]
+
+
+def test_prices_never_overlap(tmp_path):
+    from energypilot.db import Database
+
+    db = Database(tmp_path / "p.db")
+    db.put_prices([(3600 + q * 900, 900, 100.0 + q) for q in range(4)])  # quarter hours
+    db.put_prices([(3600, 3600, 50.0)])  # an hourly fallback price for the same hour
+    assert db.prices(0, 10 * 3600) == [(3600, 3600, 50.0)]
+    db.put_prices([(3600 + q * 900, 900, 80.0) for q in range(4)])  # quarter hours again
+    assert [r[1] for r in db.prices(0, 10 * 3600)] == [900] * 4

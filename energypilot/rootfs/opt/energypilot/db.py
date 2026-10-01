@@ -73,6 +73,12 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.executescript(SCHEMA)
+        # up to 0.9.0 an hourly price could sit on top of quarter hours of the same hour: keep the hour
+        self._conn.execute(
+            "DELETE FROM price WHERE dur < 3600 AND EXISTS (SELECT 1 FROM price p WHERE p.dur >= 3600 "
+            "AND p.ts <= price.ts AND price.ts < p.ts + p.dur AND p.ts <> price.ts)"
+        )
+        self._conn.commit()
         self._lock = threading.Lock()
 
     def close(self) -> None:
@@ -184,7 +190,16 @@ class Database:
 
     # ------------------------------------------------------------------- price
     def put_prices(self, rows: Iterable[tuple[int, int, float]]) -> int:
-        return self._write("INSERT OR REPLACE INTO price VALUES (?,?,?)", rows)
+        """A new row replaces every stored row it overlaps - e.g. hourly fallback prices and quarter
+        hours of the same day must never be stored on top of each other."""
+        rows = list(rows)
+        if not rows:
+            return 0
+        with self._lock, self._conn:
+            for ts, dur, _spot in rows:
+                self._conn.execute("DELETE FROM price WHERE ts < ? AND ts + dur > ?", (ts + dur, ts))
+            self._conn.executemany("INSERT OR REPLACE INTO price VALUES (?,?,?)", rows)
+        return len(rows)
 
     def prices(self, start: int, end: int) -> list[tuple[int, int, float]]:
         return self._read(

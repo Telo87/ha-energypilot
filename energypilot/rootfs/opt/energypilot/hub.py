@@ -426,7 +426,8 @@ class Hub:
         for key in ("house", "grid", "ev", "heater"):
             if sensors.get(key):
                 out[key] = sensors[key]
-        for key, series in (("grid_import", "grid_in"), ("grid_export", "grid_out")):
+        # battery power history: lets the diagnostic export measure efficiency and real charge power
+        for key, series in (("grid_import", "grid_in"), ("grid_export", "grid_out"), ("battery_power", "battery")):
             if sensors.get(key):
                 out[series] = sensors[key]
         return out
@@ -1186,8 +1187,18 @@ class Hub:
                     total += h
             return total
 
+        # many storage systems keep drawing a little from the grid while they cover the house (control
+        # tolerance, own consumption); measured in dark hours with a charged battery, used as a floor
+        reserve = b.min_soc + 5
+        floor_samples = sorted(
+            g[0] for t, r in logs.items()
+            if r[7] is not None and r[7] >= reserve and pv_of(t) == 0 and (g := self._grid_kwh(acts, t))
+        )
+        grid_floor = floor_samples[len(floor_samples) // 2] if len(floor_samples) >= 6 else 0.0
+
         def sim_bill(plan: planner.Plan, heat: float) -> dict:
-            out = bill({st.start: st.grid_import for st in plan.steps}, {st.start: st.grid_export for st in plan.steps})
+            out = bill({st.start: max(st.grid_import, grid_floor) for st in plan.steps},
+                       {st.start: st.grid_export for st in plan.steps})
             return {**out, "heater_kwh": round(heat, 2)}
 
         per_day: dict[str, list[int]] = defaultdict(list)
@@ -1274,6 +1285,7 @@ class Hub:
             "since": min(logs) if logs else None,
             "load_kind": load_kind,
             "heater_surplus": bool(heater),
+            "grid_floor_wh": round(grid_floor * 1000),
             "feed_in_ct": feed_in,
             "totals": {
                 "hours": totals["hours"],

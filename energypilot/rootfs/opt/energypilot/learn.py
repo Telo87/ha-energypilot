@@ -15,7 +15,7 @@ PV ("ep"), per array:
    model knows - shading, clipping, soiling, snow. (A shading map by sun
    position was tried as well; on real data it was not more accurate than
    this, as long as the history covers less than a year.)
-3. An uncertainty band (P10-P90) from the distribution of past errors in the
+3. An uncertainty band (about 80 %) from the distribution of past errors in the
    same weather situation.
 
 Base load ("ep" on series "base"): household consumption without EV and
@@ -51,7 +51,9 @@ SHRINK_SPLIT = 12  # hours of "prior" for the sunny / cloudy factor (pulls towar
 SUNNY_K = 0.6  # expected clear-sky index from which an hour counts as sunny
 FACTOR_RANGE = (0.3, 1.6)
 CLEAR_MARGIN = 1.2  # a forecast never exceeds the clear-sky value by more than this
-BAND_Q = (0.1, 0.9)
+# quantiles of the past errors for the band; on real data P10/P90 of the training errors contained
+# the next days only in ~72 % of the hours (errors vary more than the past suggests) - P7/P93 gives ~80 %
+BAND_Q = (0.07, 0.93)
 LOAD_TRAIN_DAYS = 28
 LOAD_HALF_LIFE = 14.0  # days
 LOAD_LEVEL = 0.5  # share of the recent level taken over (1 = fully)
