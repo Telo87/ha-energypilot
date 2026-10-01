@@ -538,3 +538,25 @@ def test_no_tiny_grid_charges_in_the_plan():
         plan = optimize(day(prices, load=rnd.uniform(0.3, 1.2)), rnd.uniform(0.3, 3), Battery(min_soc=5, efficiency=0.95), feed_in=8)
         for st in plan.steps:
             assert st.mode != "charge" or st.grid >= 0.2 - 1e-9
+
+
+def test_diagnostic_export_contains_data_but_no_secret(tmp_path):
+    import io
+    import json
+    import sqlite3
+    import zipfile
+
+    from energypilot import diagnose
+
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"sources": {"solcast_key": "secret-key-123"}, "location": {"latitude": 52.1234, "longitude": 9.5678}})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    hub.db.put_actual([("house", 3600, 500.0)])
+    name, data = diagnose.build(hub, {"summary": {"ok": 1}})
+    z = zipfile.ZipFile(io.BytesIO(data))
+    assert name.endswith(".zip") and set(z.namelist()) == {"energypilot.db", "settings.json", "state.json", "README.txt"}
+    assert b"secret-key-123" not in data and "secret-key-123" not in z.read("settings.json").decode()
+    assert json.loads(z.read("settings.json"))["sources"]["has_solcast_key"] is True
+    assert json.loads(z.read("state.json"))["location"] == [52.1234, 9.5678]  # exact
+    (tmp_path / "copy.db").write_bytes(z.read("energypilot.db"))
+    assert sqlite3.connect(tmp_path / "copy.db").execute("SELECT COUNT(*) FROM actual").fetchone()[0] == 1

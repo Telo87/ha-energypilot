@@ -173,6 +173,22 @@ async def setup_check(request: web.Request) -> web.Response:
     return _ok(await setupcheck.run(_hub(request)))
 
 
+@routes.get("/api/export")
+async def export(request: web.Request) -> web.Response:
+    """Diagnostic export (ZIP) - see diagnose.py."""
+    from . import diagnose, setupcheck
+
+    hub = _hub(request)
+    try:
+        check = await setupcheck.run(hub)
+    except Exception:  # the export must work even if the check fails
+        _LOGGER.exception("Setup check for the export failed")
+        check = None
+    name, data = await asyncio.to_thread(diagnose.build, hub, check)
+    return web.Response(body=data, content_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+
+
 @routes.get("/api/plan")
 async def plan(request: web.Request) -> web.Response:
     hub = _hub(request)

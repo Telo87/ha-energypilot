@@ -1,6 +1,6 @@
 # EnergyPilot – Home Assistant Add-on
 
-![Version](https://img.shields.io/badge/version-0.8.3-blue)
+![Version](https://img.shields.io/badge/version-0.9.0-blue)
 
 Welche PV-Prognose stimmt bei **deinem** Dach – und wann lohnt es sich, den Akku zu halten oder günstig aus
 dem Netz zu laden? EnergyPilot sammelt stündlich die Prognosen mehrerer Wetterdienste, vergleicht sie mit
@@ -36,7 +36,7 @@ echten Messwerten nachgerechnet.
 - **Heizstab mit eigener Überschussregelung** wird als solcher berücksichtigt
 
 **Einrichtung und Home Assistant**
-- **Einrichtung:** prüft Sensoren, Einheiten, Vorzeichen, Anlagenleistung, Tarif, Batterie und die **Energiebilanz** – mit Link zur passenden Einstellung und einer Hinweiszahl im Menü
+- **Einrichtung:** prüft Sensoren, Einheiten, Vorzeichen, Anlagenleistung, Tarif, Batterie und die **Energiebilanz** – mit Link zur passenden Einstellung und einer Hinweiszahl im Menü; **Diagnose-Export** für eine ausführliche Prüfung
 - **Sensoren** für Automationen: Empfehlung, Netzladen/Entladesperre, Akku-Reichweite, Strompreis, PV- und Verbrauchsprognose, genaueste Quelle
 
 ## Geplant

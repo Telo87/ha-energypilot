@@ -1177,7 +1177,8 @@
     const d = await loadCheck(true);
     if (stale(token)) return;
     const sm = d.summary;
-    setHeader('Einrichtung', `${sm.ok || 0} in Ordnung · ${sm.warn || 0} Hinweise · ${sm.err || 0} Probleme`, `<button class="btn" id="chkAgain">${ic('refresh')}<span class="hide-sm">Erneut prüfen</span></button>`);
+    setHeader('Einrichtung', `${sm.ok || 0} in Ordnung · ${sm.warn || 0} Hinweise · ${sm.err || 0} Probleme`,
+      `<a class="btn" href="api/export" download title="Datenbank, Einstellungen (ohne Schlüssel) und aktueller Zustand als ZIP – für eine ausführliche Prüfung">${ic('database')}<span class="hide-sm">Diagnose-Export</span></a><button class="btn" id="chkAgain">${ic('refresh')}<span class="hide-sm">Erneut prüfen</span></button>`);
     const order = { err: 0, warn: 1, info: 2, ok: 3 };
     const onlyIssues = store.get('setupIssues', false);
     el.innerHTML = `<div class="toolbar"><label class="check"><input type="checkbox" id="chkIssues" ${onlyIssues ? 'checked' : ''}>Nur Probleme und Hinweise anzeigen</label></div>

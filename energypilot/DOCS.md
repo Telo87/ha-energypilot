@@ -37,6 +37,12 @@ passenden Einstellung. Geprüft werden unter anderem:
 
 Gibt es Probleme, zeigt das Menü deren Anzahl und die Übersicht einen Hinweis.
 
+**Diagnose-Export** (oben auf der Seite Einrichtung) lädt eine ZIP-Datei herunter: die Datenbank des
+Add-ons (alle Prognosen, Messwerte, Preise und das Protokoll), die Einstellungen ohne Solcast-Schlüssel und
+den aktuellen Zustand (Plan mit Erklärung, Live-Werte, gelernte Gewichte, Status der Datenquellen). Damit lässt
+sich alles außerhalb von Home Assistant nachrechnen, etwa für eine ausführliche Fehlersuche. Die Datei enthält
+den Standort und stündliche Verbrauchs- und Erzeugungswerte – nur weitergeben, wem du das anvertraust.
+
 ## Messsensor
 
 Der Sensor braucht eine **Langzeitstatistik**, also ein Attribut `state_class`. Die

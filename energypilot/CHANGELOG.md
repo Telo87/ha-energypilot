@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.0
+
+- Einrichtung: neuer Knopf **„Diagnose-Export“** – lädt eine ZIP-Datei mit der Datenbank (alle Prognosen, Messwerte, Preise, Protokoll), den Einstellungen ohne Solcast-Schlüssel und dem aktuellen Zustand (Plan mit Erklärung, Live-Werte, gelernte Gewichte, Status, Einrichtungsprüfung). Damit lassen sich Prognosen, Lernen, Planung und Protokoll außerhalb von Home Assistant genau nachrechnen
+
 ## 0.8.3
 
 Durchsicht der laufenden Installation:
