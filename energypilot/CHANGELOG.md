@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.3
+
+Durchsicht der laufenden Installation:
+
+- Behoben (Tagesverlauf): Forecast.Solar liefert nur Stunden mit Sonne und galt deshalb als „nur 13 Stunden berechnet“ (ausgegraut, ohne Platz). Vollständig ist eine Quelle jetzt, wenn sie alle Stunden mit Erzeugung abdeckt
+- Behoben (Planung): Rundungsreste der Planung erschienen als „Aus dem Netz laden“ (z. B. 0,15 kWh zu 43 ct). Unter 0,2 kWh gibt es keine Netzladung mehr, der Akku bleibt dann wie er ist
+- Behoben: „Akku leer“ stimmt in Übersicht und „Warum dieser Plan?“ jetzt überein (vorher 21:49 bzw. 21:00)
+- Behoben: „−0,00 €“; Diagramme mit lauter Nullwerten zeigen eine normale Achse; kleine Netzbezüge auf der Kosten-Seite mit einer Nachkommastelle („0,5 kWh“ statt „0 kWh“)
+
 ## 0.8.2
 
 - Behoben (Forecast.Solar „Abruflimit erreicht“): Jeder Durchlauf fragte alle Anlagen und Teilflächen ab – auch die Wiederholungen alle 15 Minuten ab 13 Uhr (bis die Preise für morgen da sind), „Jetzt abrufen“, gespeicherte Einstellungen und Neustarts. Mit drei Teilflächen waren so schnell die 12 erlaubten Abrufe pro Stunde erreicht. Jetzt wird jede Anlage höchstens einmal pro Stunde abgefragt (auch über Neustarts hinweg), nach „Abruflimit“ pausiert EnergyPilot eine Stunde, und eine geänderte Ausrichtung wird sofort neu abgefragt

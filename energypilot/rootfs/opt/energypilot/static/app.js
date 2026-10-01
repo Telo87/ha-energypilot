@@ -6,7 +6,10 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const nf = (v, d = 0) => Number(v).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const nf = (v, d = 0) => {
+    const r = Math.round(Number(v) * 10 ** d) / 10 ** d;
+    return (Object.is(r, -0) ? 0 : r).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });  // never "-0,00"
+  };
   // Re-render without jumping: automatic refreshes replace the page content,
   // which can briefly shorten the document and reset the scroll position.
   function keepScroll(fn) {
@@ -257,7 +260,7 @@
     const pad = { l: 56, r: 10, t: 14, b: 26 };
     // axis: a "nice" step (1/2/2.5/5·10ⁿ) for about four gridlines, ends just above the data
     const hi = Math.max(0, ...vals); const lo = Math.min(0, ...vals);
-    const stepV = c.maxY ? niceMax(c.maxY / 4) : niceMax(Math.max(hi - lo, 1e-9) / 4);
+    const stepV = c.maxY ? niceMax(c.maxY / 4) : niceMax((hi - lo > 1e-9 ? hi - lo : 1) / 4);
     const max = c.maxY || Math.max(stepV, Math.ceil((hi * 1.02) / stepV) * stepV);
     const min = lo < 0 ? Math.floor((lo * 1.02) / stepV) * stepV : 0;
     const cw = (W - pad.l - pad.r) / n;
@@ -753,7 +756,7 @@
   }
 
   // ---------------------------------------------------------------- journal
-  const eur = (v) => (v == null ? '–' : `${v < 0 ? '−' : ''}${nf(Math.abs(v), 2)} €`);
+  const eur = (v) => (v == null ? '–' : `${Math.round(v * 100) < 0 ? '−' : ''}${nf(Math.abs(v), 2)} €`);
   async function renderJournal(el, token) {
     const days = store.get('journalDays', 14);
     const d = await api(`journal?days=${days}`);
@@ -993,8 +996,11 @@
       const measured = d.hours.map((_t, i) => i).filter((i) => d.actual[i] != null);
       const actSum = measured.length ? measured.reduce((a, i) => a + d.actual[i], 0) / 1000 : null;
       const partDay = measured.length > 0 && measured.length < d.hours.length;
-      const coverage = (vals) => vals.filter((v) => v != null).length;
-      const full = Math.max(0, ...lines.map((l) => coverage((d.forecasts[l.key] || {})[cfg.horizon] || [])));
+      // hours that matter: something was produced or forecast (night hours without values are fine)
+      const productive = d.hours.map((_t, i) => i).filter((i) => (d.actual[i] || 0) > 10
+        || lines.some((l) => (((d.forecasts[l.key] || {})[cfg.horizon] || [])[i] || 0) > 10));
+      const coverage = (vals) => productive.filter((i) => vals[i] != null).length;
+      const full = productive.length;
       const rows = lines.map((l) => {
         const vals = (d.forecasts[l.key] || {})[cfg.horizon];
         if (!vals) return '';
@@ -1129,7 +1135,7 @@
       <div class="grid kpis">
         ${kpi('wallet', '', 'Stromkosten', `${cnt('ct', nf(t.total_eur, 2))}<small>€</small>`, `Netzbezug ${eur(t.energy_eur)} + Grundgebühr ${eur(t.fee_eur)} − Einspeisung ${eur(t.feed_in_eur)}${t.days < 28 ? ` · ${t.days} Tage` : ''}`)}
         ${kpi('euro', better != null && better > 0 ? 'ok' : 'warn', 'Ø bezahlter Preis', t.avg_paid_ct == null ? '–' : `${cnt('cp', nf(t.avg_paid_ct, 1))}<small>ct/kWh</small>`, t.avg_market_ct == null ? '' : `Ø aller Viertelstunden ${nf(t.avg_market_ct, 1)} ct${better != null ? ` · ${better >= 0 ? `${nf(better, 1)} ct günstiger gekauft` : `${nf(-better, 1)} ct teurer gekauft`}` : ''}`)}
-        ${kpi('plug', '', 'Netzbezug', `${cnt('ci', nf(t.import_kwh, 0))}<small>kWh</small>`, `Einspeisung ${nf(t.export_kwh, 0)} kWh${d.feed_in.avg_ct ? ` à ${d.feed_in.per_array && t.export_kwh > 0.05 ? `Ø ${nf(t.feed_in_eur / t.export_kwh * 100, 2)}` : nf(d.feed_in.avg_ct, 2)} ct` : ' – Vergütung in den Einstellungen eintragen'}`)}
+        ${kpi('plug', '', 'Netzbezug', `${cnt('ci', nf(t.import_kwh, t.import_kwh < 10 ? 1 : 0))}<small>kWh</small>`, `Einspeisung ${nf(t.export_kwh, t.export_kwh < 10 ? 1 : 0)} kWh${d.feed_in.avg_ct ? ` à ${d.feed_in.per_array && t.export_kwh > 0.05 ? `Ø ${nf(t.feed_in_eur / t.export_kwh * 100, 2)}` : nf(d.feed_in.avg_ct, 2)} ct` : ' – Vergütung in den Einstellungen eintragen'}`)}
         ${!cmpOn ? '' : kpi('trophy', t.savings_eur >= 0 ? 'ok' : 'err', t.savings_eur >= 0 ? `Gespart ggü. ${cmpName}` : `Mehrkosten ggü. ${cmpName}`, `${cnt('cs', nf(Math.abs(t.savings_eur), 2))}<small>€</small>`, `${cmpText} wäre${isFlat ? '' : 'n'} ${eur(t.compare_total_eur)} gewesen`)}
         ${t.autarky_pct != null ? kpi('home', 'up', 'Autarkie', `${cnt('ca', nf(t.autarky_pct, 0))}<small>%</small>`, `des Hausverbrauchs aus eigener Erzeugung${t.self_use_pct != null ? ` · Eigenverbrauch ${nf(t.self_use_pct, 0)} % der PV` : ''}`) : ''}
       </div>

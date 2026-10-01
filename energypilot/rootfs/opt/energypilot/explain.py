@@ -100,8 +100,15 @@ def explain(hours: list[planner.Hour], plan: planner.Plan, base: planner.Plan, b
     before = [(hours[k].price, max(0.0, st.soc_start - st.soc_end)) for k, st in enumerate(base.steps[:empty_i or n])]
     before = [(p, e) for p, e in before if e > 0.02]
     cheapest = min(range(n), key=lambda k: hours[k].price) if n else None
+    empty_at = None
+    if empty_i is not None:
+        st, h = base.steps[empty_i], hours[empty_i]
+        drop = st.soc_start - st.soc_end
+        share = min(1.0, max(0.0, (st.soc_start - lo) / drop)) if drop > 0 else 0.0
+        t0 = st.start + (1 - h.fraction) * 3600  # the first hour starts now
+        empty_at = int(t0 + share * h.fraction * 3600)
     base_summary = {
-        "empty_at": base.steps[empty_i].start if empty_i is not None else None,
+        "empty_at": empty_at,
         "price_after": round(_avg(after), 1) if after else None,
         "price_after_max": round(max(p for p, _e in after), 1) if after else None,
         "price_before": round(_avg(before), 1) if before else None,

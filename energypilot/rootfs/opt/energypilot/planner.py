@@ -172,8 +172,10 @@ def optimize(hours: list[Hour], soc_kwh: float, b: Battery, feed_in: float) -> P
         mode, j = choice[t][idx(soc)]
         target = j * STEP_KWH if mode == "charge" else None
         soc_end, imp, exp, cost, grid = _flows(mode, soc, target, h, b, feed_in, lo, hi)
-        if mode == "charge" and grid < MIN_GRID_CHARGE / 2:
+        if mode == "charge" and grid < MIN_GRID_CHARGE:
+            # too small to be worth switching the battery: keep it as it is instead
             mode = "hold"
+            soc_end, imp, exp, cost, grid = _flows(mode, soc, None, h, b, feed_in, lo, hi)
         if mode == "hold" and (h.pv_kwh >= h.load_kwh or soc <= lo + STEP_KWH):
             mode = "normal"  # nothing to hold back (surplus hour or battery already empty)
         plan.steps.append(Step(h.start, mode, soc, soc_end, imp, exp, cost, grid if mode == "charge" else 0.0))

@@ -527,3 +527,14 @@ def test_forecast_solar_once_per_hour_and_pause_after_rate_limit(tmp_path, monke
     asyncio.run(hub.fetch_forecasts())
     asyncio.run(hub.fetch_forecasts())
     assert len(calls) == 3 and hub.status["fs"]["ok"] is False  # stopped at the limit, then paused
+
+
+def test_no_tiny_grid_charges_in_the_plan():
+    import random
+
+    rnd = random.Random(3)
+    for _ in range(30):
+        prices = [rnd.uniform(30, 55) for _ in range(30)]
+        plan = optimize(day(prices, load=rnd.uniform(0.3, 1.2)), rnd.uniform(0.3, 3), Battery(min_soc=5, efficiency=0.95), feed_in=8)
+        for st in plan.steps:
+            assert st.mode != "charge" or st.grid >= 0.2 - 1e-9
