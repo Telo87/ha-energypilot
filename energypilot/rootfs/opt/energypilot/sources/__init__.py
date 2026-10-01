@@ -8,7 +8,9 @@ import aiohttp
 
 
 class SourceError(Exception):
-    pass
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status  # HTTP status, e.g. 429 = rate limit
 
 
 async def get_json(
@@ -17,7 +19,7 @@ async def get_json(
     try:
         async with session.get(url, params=params, headers=headers) as resp:
             if resp.status == 429:
-                raise SourceError("Abruflimit erreicht – nächster Versuch später")
+                raise SourceError("Abruflimit erreicht – nächster Versuch später", 429)
             if resp.status in (401, 403):
                 raise SourceError("Zugriff verweigert – API-Schlüssel prüfen")
             if resp.status >= 400:

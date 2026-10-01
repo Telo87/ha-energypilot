@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.2
+
+- Behoben (Forecast.Solar „Abruflimit erreicht“): Jeder Durchlauf fragte alle Anlagen und Teilflächen ab – auch die Wiederholungen alle 15 Minuten ab 13 Uhr (bis die Preise für morgen da sind), „Jetzt abrufen“, gespeicherte Einstellungen und Neustarts. Mit drei Teilflächen waren so schnell die 12 erlaubten Abrufe pro Stunde erreicht. Jetzt wird jede Anlage höchstens einmal pro Stunde abgefragt (auch über Neustarts hinweg), nach „Abruflimit“ pausiert EnergyPilot eine Stunde, und eine geänderte Ausrichtung wird sofort neu abgefragt
+- Einrichtung: Ein kurzzeitig nicht abrufbarer Prognosedienst ist nur noch ein Hinweis, solange seine letzte Prognose jünger als 3 Stunden ist (sie wird weiter verwendet); erst danach eine Warnung, mit dem Zeitpunkt der letzten erfolgreichen Prognose
+
 ## 0.8.1
 
 - Behoben (Übersicht): Die Empfehlung konnte bis zu 5 Minuten alt sein – kurz nach einer vollen Stunde sogar noch die der vorigen Stunde (z. B. „Akku halten“, obwohl für die neue Stunde „Eigenverbrauch“ geplant war). Ist der Plan älter als 1 Minute oder aus einer anderen Stunde, rechnet die Übersicht jetzt vor der Anzeige neu; zu jeder vollen Stunde wird sofort neu geplant, auch für die Sensoren in Home Assistant. Die Empfehlung zeigt ihren Stand („Stand 06:02“)

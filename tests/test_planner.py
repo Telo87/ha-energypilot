@@ -497,3 +497,33 @@ def test_plan_is_stale_after_the_hour_changes(tmp_path):
     assert not hub.plan_stale(60)
     hub._plan_at = hour - 30  # made 30 s before the current hour began
     assert hub.plan_stale(3600)
+
+
+def test_forecast_solar_once_per_hour_and_pause_after_rate_limit(tmp_path, monkeypatch):
+    import asyncio
+
+    from energypilot.sources import SourceError, forecastsolar
+
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"location": {"latitude": 52, "longitude": 9}, "sources": {"open_meteo": False, "forecast_solar": True}})
+    settings.upsert_array({"name": "Garage", "planes": [{"kwp": 2.6, "azimuth": 90}, {"kwp": 2.6, "azimuth": 270}]})
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), HomeAssistant())
+    calls = []
+
+    async def fake(session, lat, lon, tilt, az, kwp):
+        calls.append(az)
+        if fake.limit:
+            raise SourceError("Abruflimit erreicht", 429)
+        return {int(time.time()) // 3600 * 3600 + 3600: 500.0}
+
+    fake.limit = False
+    monkeypatch.setattr(forecastsolar, "fetch", fake)
+    asyncio.run(hub.fetch_forecasts())
+    asyncio.run(hub.fetch_forecasts())  # e.g. a price retry 15 minutes later
+    assert len(calls) == 2  # two planes, one fetch in this hour
+    hub._fs_last.clear()
+    hub.db.set_meta(f"fs_last:{hub.settings.arrays[0]['id']}", "0")
+    fake.limit = True
+    asyncio.run(hub.fetch_forecasts())
+    asyncio.run(hub.fetch_forecasts())
+    assert len(calls) == 3 and hub.status["fs"]["ok"] is False  # stopped at the limit, then paused

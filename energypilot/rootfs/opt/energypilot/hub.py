@@ -22,6 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 
 ARCHIVE_CHUNK_DAYS = 92
 LIVE_INTERVAL = 15
+FS_INTERVAL = 55 * 60  # Forecast.Solar: once per array and hour
 PLAN_INTERVAL = 300
 MODE_LABEL = {"normal": "Eigenverbrauch", "hold": "Akku halten", "charge": "Aus dem Netz laden"}
 GEOMETRY_KEYS = ("planes", "efficiency", "ac_max_kw")
@@ -57,6 +58,10 @@ class Hub:
         self._wake = asyncio.Event()
         self._busy = asyncio.Lock()
         self._solcast_slots: set[str] = set()
+        # Forecast.Solar allows 12 calls per hour and IP: at most one fetch per array and hour,
+        # and a break of one hour after "rate limit" (instead of asking again and again)
+        self._fs_last: dict[str, float] = {}
+        self._fs_pause_until = 0.0
         self._price_slot: int | None = None
         self._acc_cache: dict[tuple, tuple[float, dict]] = {}
         self._midnight: dict[str, int] = {}
@@ -283,9 +288,14 @@ class Hub:
                 self.db.put_forecast(frows)
                 self.mark(key, True, count=len(hours))
 
-        if src["forecast_solar"]:
-            errors, count = [], 0
+        pause = max(self._fs_pause_until, float(self.db.get_meta("fs_pause") or 0))  # also across restarts
+        if src["forecast_solar"] and now >= pause:
+            errors, count, asked = [], 0, False
             for cfg, _arr in arrays:
+                last = self._fs_last.get(cfg["id"]) or float(self.db.get_meta(f"fs_last:{cfg['id']}") or 0)
+                if now - last < FS_INTERVAL:
+                    continue  # this hour's forecast is already there
+                asked = True
                 # one call per plane, summed – a partial sum would look like a bad forecast
                 hours: dict[int, float] = {}
                 try:
@@ -297,11 +307,18 @@ class Hub:
                             hours[t] = hours.get(t, 0.0) + wh
                 except SourceError as err:
                     errors.append(f"{cfg['name']}: {err}")
+                    if err.status == 429:
+                        self._fs_pause_until = now + 3600
+                        self.db.set_meta("fs_pause", str(self._fs_pause_until))
+                        break
                     continue
+                self._fs_last[cfg["id"]] = now
+                self.db.set_meta(f"fs_last:{cfg['id']}", str(now))
                 self.db.put_forecast(self._direct_rows("fs", cfg["id"], hours, now))
                 count += len(hours)
             # one status for all arrays: a later success must not hide the failure of another array
-            self.mark("fs", not errors, "; ".join(errors), count=count)
+            if asked:
+                self.mark("fs", not errors, "; ".join(errors), count=count)
 
         key = src.get("solcast_key")
         slot = datetime.fromtimestamp(now, self.tz).strftime("%Y-%m-%d-%H")

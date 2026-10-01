@@ -325,7 +325,15 @@ async def run(hub: Hub) -> dict:
         if key.startswith(("om:", "fs", "sc")):
             if stt["ok"]:
                 continue
-            fc.append(_c("warn", f"{source_label(key)}: Abruf fehlgeschlagen", stt.get("text", ""), LINK["sources"]))
+            # after a restart the status is new - the stored forecasts know when the source last delivered
+            issued = {src: last for src, _n, _first, last in hub.db.forecast_sources()}
+            last = stt.get("last_ok") or issued.get(key) or None
+            if last and now - last < 3 * 3600:  # a short outage: the last forecast is still in use
+                fc.append(_c("info", f"{source_label(key)}: gerade nicht abrufbar",
+                             f"{stt.get('text', '')} – die Prognose von {datetime.fromtimestamp(last, hub.tz):%H:%M} Uhr wird weiter verwendet."))
+                continue
+            fc.append(_c("warn", f"{source_label(key)}: Abruf fehlgeschlagen",
+                         stt.get("text", "") + (f" – letzte erfolgreiche Prognose {datetime.fromtimestamp(last, hub.tz):%d.%m. %H:%M}" if last else ""), LINK["sources"]))
     if hub.backfill.get("running"):
         fc.append(_c("info", "Archiv wird geladen", hub.backfill.get("text", "")))
     if hub.model_info:

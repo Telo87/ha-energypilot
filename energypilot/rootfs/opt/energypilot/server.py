@@ -223,8 +223,10 @@ async def save_array(request: web.Request) -> web.Response:
         if old["sensor"]:
             await asyncio.to_thread(hub.db.del_meta_prefix, f"actual:{old['sensor']}")
     if old and geometry_changed:
-        # Forecast.Solar values were calculated for the old geometry
+        # Forecast.Solar values were calculated for the old geometry - fetch them again right away
         await asyncio.to_thread(hub.db.delete_forecast_source, "fs", arr["id"])
+        hub._fs_last.pop(arr["id"], None)
+        await asyncio.to_thread(hub.db.set_meta, f"fs_last:{arr['id']}", "0")
     if geometry_changed:
         asyncio.create_task(_recompute_then_trigger(hub, arr))
     else:
