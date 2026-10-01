@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1
+
+- Behoben (Übersicht): Die Empfehlung konnte bis zu 5 Minuten alt sein – kurz nach einer vollen Stunde sogar noch die der vorigen Stunde (z. B. „Akku halten“, obwohl für die neue Stunde „Eigenverbrauch“ geplant war). Ist der Plan älter als 1 Minute oder aus einer anderen Stunde, rechnet die Übersicht jetzt vor der Anzeige neu; zu jeder vollen Stunde wird sofort neu geplant, auch für die Sensoren in Home Assistant. Die Empfehlung zeigt ihren Stand („Stand 06:02“)
+- Planung: Die Farben im Diagramm „Strompreis & Fahrplan“ passen jetzt zum Stundenplan – Eigenverbrauch grün, Akku halten orange, Aus dem Netz laden blau
+
 ## 0.8.0
 
 - Planung: neuer Knopf **„Warum dieser Plan?“** (auch „Warum?“ in der Übersicht). Die Erklärung wird aus dem aktuellen Plan berechnet: wann der Akku ohne Eingriff leer wäre und was Netzstrom danach kostet; für jede Phase „Akku halten“ bzw. „Aus dem Netz laden“ Uhrzeit, Preis, Menge, für welche Stunden die Energie aufgehoben wird (Vergleich mit dem Akku ohne Eingriff) und der Vorteil je kWh nach Verlusten; eine Nacht mit einzelnen kurzen Entladestunden erscheint als eine Phase. Bleibt der Akku im Eigenverbrauch, steht dort der Grund. Dazu die Regeln des Planers mit den eigenen Einstellungen

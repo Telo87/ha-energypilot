@@ -488,3 +488,12 @@ def test_explanation_without_intervention():
     why = explain.explain(day([15.0] * 4 + [50.0] * 6), charge, simulate(day([15.0] * 4 + [50.0] * 6), 1.1, b, 8), b)
     item = next(i for i in why["items"] if i["mode"] == "charge")
     assert item["energy_kwh"] > 0.2 and item["price_use"] == 50.0 and item["gain_ct_per_kwh"] == round(50 * 0.92 - 15, 1)
+
+
+def test_plan_is_stale_after_the_hour_changes(tmp_path):
+    hub = Hub(Options(), Settings(tmp_path / "s.json"), Database(tmp_path / "x.db"), HomeAssistant())
+    hour = int(time.time()) // 3600 * 3600
+    hub._plan_at = time.time()
+    assert not hub.plan_stale(60)
+    hub._plan_at = hour - 30  # made 30 s before the current hour began
+    assert hub.plan_stale(3600)

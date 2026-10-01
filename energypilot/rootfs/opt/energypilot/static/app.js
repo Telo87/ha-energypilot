@@ -516,7 +516,7 @@
       const wv = (k, v) => `${w(k, v)}${v == null ? '' : `<small>${wu(v)}</small>`}`;
       const m = plan && plan.ok ? MODE[plan.decision] : null;
       const decision = m ? `<div class="now-decision m-${plan.decision}">
-          <div class="now-kicker">Empfehlung jetzt</div>
+          <div class="now-kicker">Empfehlung jetzt${plan.at ? ` <span class="faint" style="text-transform:none;letter-spacing:0;font-weight:500">· Stand ${fmtHour(plan.at)}</span>` : ''}</div>
           <div class="now-title"><span class="avatar ${m[2]}">${ic(m[1])}</span>${esc(plan.label)}</div>
           <p class="muted">${esc(plan.text)}</p>
           <div class="row wrap" style="gap:8px"><span class="badge ${plan.buy_now ? 'accent' : ''}">Strom kaufen: ${plan.buy_now ? 'ja' : 'nein'}</span><a class="btn sm" href="#/plan">${ic('battery')}Zur Planung</a><a class="btn sm" href="#/plan?why=1">${ic('info')}Warum?</a></div></div>`

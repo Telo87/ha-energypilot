@@ -1056,6 +1056,11 @@ class Hub:
             "why": why,
         }
 
+    def plan_stale(self, max_age: float) -> bool:
+        """Too old - or made in another hour, so its first step is not the current hour any more."""
+        now = time.time()
+        return now - self._plan_at > max_age or int(now) // 3600 != int(self._plan_at) // 3600
+
     async def update_plan(self) -> None:
         try:
             self.nowcast = await asyncio.to_thread(self.compute_nowcast)
@@ -1311,7 +1316,7 @@ class Hub:
         while True:
             try:
                 await self.read_live()
-                if time.time() - self._plan_at > PLAN_INTERVAL:
+                if self.plan_stale(PLAN_INTERVAL):  # also right at the start of every hour
                     await self.update_plan()
                     await self.publish_plan()
                 slot = int(time.time()) // 900

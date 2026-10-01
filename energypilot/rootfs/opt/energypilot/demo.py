@@ -184,7 +184,7 @@ async def live_loop(hub) -> None:
         })
         hub.live = {"at": now, "values": values}
         hub.sample_pv()
-        if now - hub._plan_at > 60:
+        if hub.plan_stale(60):
             await hub.update_plan()
         await asyncio.sleep(5)
 

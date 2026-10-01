@@ -83,7 +83,10 @@ async def index(request: web.Request) -> web.Response:
 
 @routes.get("/api/overview")
 async def overview(request: web.Request) -> web.Response:
-    return _ok(await asyncio.to_thread(_hub(request).overview))
+    hub = _hub(request)
+    if hub.plan_stale(60):  # the overview shows the recommendation, too - same freshness as the plan page
+        await hub.update_plan()
+    return _ok(await asyncio.to_thread(hub.overview))
 
 
 @routes.get("/api/day")
@@ -173,7 +176,7 @@ async def setup_check(request: web.Request) -> web.Response:
 @routes.get("/api/plan")
 async def plan(request: web.Request) -> web.Response:
     hub = _hub(request)
-    if time.time() - hub._plan_at > 60:
+    if hub.plan_stale(60):
         await hub.update_plan()
     return _ok(hub.plan)
 

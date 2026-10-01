@@ -610,9 +610,10 @@ svg.i.flip { transform: scaleX(-1); }
 .ent-empty { padding: 12px; font-size: 12.5px; color: var(--text-2); }
 
 /* planning */
-.chart .bar-p.m-charge, .legend i.m-charge { fill: var(--s3); background: var(--s3); }
-.chart .bar-p.m-hold, .legend i.m-hold { fill: var(--s4); background: var(--s4); }
-.chart .bar-p.m-normal, .legend i.m-normal { fill: var(--price); background: var(--price); }
+/* the same colours as the mode badges in the hour table and the recommendation */
+.chart .bar-p.m-charge, .legend i.m-charge { fill: var(--accent); background: var(--accent); }
+.chart .bar-p.m-hold, .legend i.m-hold { fill: var(--warn); background: var(--warn); }
+.chart .bar-p.m-normal, .legend i.m-normal { fill: var(--ok); background: var(--ok); }
 .card.decision { border-left: 4px solid var(--ok); }
 .card.decision.warn { border-left-color: var(--warn); }
 .card.decision.accent { border-left-color: var(--accent); }
