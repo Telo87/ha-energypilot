@@ -2,8 +2,8 @@ name: EnergyPilot
 version: "0.8.3"
 slug: energypilot
 description: >-
-  Energiemanager für PV, Batterie, E-Auto und dynamischen Strompreis –
-  vergleicht PV-Prognosen mit der echten Erzeugung und lernt daraus.
+  Energiemanager für PV, Batterie und dynamischen Strompreis – vergleicht
+  PV-Prognosen mit der echten Erzeugung, lernt daraus und plant den Akku.
 url: https://github.com/Telo87/ha-energypilot
 # Nach dem ersten veröffentlichten Release (Workflow "Build") und nachdem das
 # Paket auf GitHub öffentlich gestellt wurde, einkommentieren:
