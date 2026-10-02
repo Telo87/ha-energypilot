@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.2
+
+- Neues Wettermodell **DMI Harmonie** (2 km, Nordwesteuropa). Es ist zusammen mit **KNMI Harmonie** (2 km) jetzt standardmäßig aktiv; bei bestehenden Installationen werden beide einmalig eingeschaltet, ihr Prognose-Archiv wird automatisch nachgeladen. Wer eines davon wieder abschaltet, behält diese Wahl
+- Prognosequellen: Knopf **„Anleitung“** für Solcast – Schritt für Schritt von der kostenlosen Anmeldung bis zum API-Schlüssel, mit Links und den Werten, die für jede Anlage bei Solcast einzutragen sind (Azimut bereits in die Zählweise von Solcast umgerechnet, Ost/West-Anlagen als eine flache Fläche)
+
 ## 0.9.1
 
 Aus der Auswertung eines Diagnose-Exports:

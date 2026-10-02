@@ -157,6 +157,7 @@
     palette: '<path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11.5" r="1"/><circle cx="10.5" cy="7.5" r="1"/><circle cx="15" cy="7.5" r="1"/>',
     compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
     journal: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/>',
+    external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
     wallet: '<path d="M20 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5"/><path d="M16 13h.01"/>',
   };
   const ic = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[name] || ''}</svg>`;
@@ -220,7 +221,7 @@
   const shiftDay = (day, n) => { const d = new Date(`${day}T12:00:00`); d.setDate(d.getDate() + n); return localDay(d); };
 
   // Source colours: fixed per source (identity follows the entity, never its rank)
-  const SRC_SLOT = { 'om:best_match': 1, 'om:icon_d2': 2, 'om:ecmwf_ifs025': 3, fs: 4, 'om:icon_eu': 5, 'om:gfs_seamless': 6, 'om:meteofrance_seamless': 7, sc: 8 };
+  const SRC_SLOT = { 'om:best_match': 1, 'om:icon_d2': 2, 'om:ecmwf_ifs025': 3, fs: 4, 'om:icon_eu': 5, 'om:gfs_seamless': 6, 'om:meteofrance_seamless': 7, sc: 8, 'om:knmi_seamless': 9, 'om:dmi_seamless': 10 };
   const srcColor = (s) => (s === 'ep' ? 'var(--text)' : s === 'nc' ? 'var(--text-2)' : SRC_SLOT[s] ? `var(--s${SRC_SLOT[s]})` : 'var(--s-other)');
   const BAND = { label: 'Spanne (80 %)', color: 'var(--band)' };
   const BASE = 'base';
@@ -852,7 +853,7 @@
           <div style="font-size:12.5px;line-height:2"><span class="muted">${ic('cloud')} Bei Wolken:</span> ${hourChips(f.cloudy)}</div></div>`;
       }).join('')}</div></div></div>`;
   }
-  const SOURCE_NAMES = { 'om:best_match': 'Open-Meteo Auto', 'om:icon_d2': 'DWD ICON-D2', 'om:icon_eu': 'DWD ICON-EU', 'om:ecmwf_ifs025': 'ECMWF IFS', 'om:gfs_seamless': 'NOAA GFS', 'om:meteofrance_seamless': 'Météo-France', 'om:knmi_seamless': 'KNMI Harmonie', 'om:ukmo_seamless': 'UK Met Office', fs: 'Forecast.Solar', sc: 'Solcast', ep: 'EnergyPilot (lernend)', nc: 'EnergyPilot (live korrigiert)', lw: 'Wie vor einer Woche' };
+  const SOURCE_NAMES = { 'om:best_match': 'Open-Meteo Auto', 'om:icon_d2': 'DWD ICON-D2', 'om:icon_eu': 'DWD ICON-EU', 'om:ecmwf_ifs025': 'ECMWF IFS', 'om:gfs_seamless': 'NOAA GFS', 'om:meteofrance_seamless': 'Météo-France', 'om:knmi_seamless': 'KNMI Harmonie', 'om:dmi_seamless': 'DMI Harmonie', 'om:ukmo_seamless': 'UK Met Office', fs: 'Forecast.Solar', sc: 'Solcast', ep: 'EnergyPilot (lernend)', nc: 'EnergyPilot (live korrigiert)', lw: 'Wie vor einer Woche' };
   const sourceName = (src) => SOURCE_NAMES[src] || src;
 
   // --------------------------------------------------------------- accuracy
@@ -1435,6 +1436,40 @@
     try { S.settings = { ...S.settings, ...(await api('settings', { method: 'POST', body: values })) }; await loadSettings(); toast(msg); return true; } catch (e) { toast(e.message, 'err'); return false; }
   }
 
+  const SOLCAST_SIGNUP = 'https://solcast.com/free-rooftop-solar-forecasting';
+  const SOLCAST_TOOLKIT = 'https://toolkit.solcast.com.au/';
+  // Solcast counts the azimuth from north, east negative and west positive (south = 180)
+  const solcastAzimuth = (az) => { const v = ((540 - az) % 360) - 180; return v === -180 ? 180 : v; };
+
+  function solcastGuide() {
+    const arrays = S.settings.arrays.filter((a) => a.kwp > 0);
+    // Solcast knows one orientation per site: an even east/west split behaves almost like a flat
+    // roof, otherwise the largest plane gives the direction
+    const site = (a) => {
+      const big = [...a.planes].sort((x, y) => y.kwp - x.kwp)[0];
+      const [p, q] = a.planes;
+      const ew = a.planes.length === 2 && Math.abs(Math.abs(p.azimuth - q.azimuth) - 180) <= 30 && Math.abs(p.kwp - q.kwp) <= 0.25 * Math.max(p.kwp, q.kwp);
+      return ew ? { tilt: 0, az: 180, note: 'Ost/West – als flache Fläche' } : { tilt: big.tilt, az: solcastAzimuth(big.azimuth), note: a.planes.length > 1 ? 'Ausrichtung der größten Fläche' : '' };
+    };
+    const rows = arrays.map((a) => { const x = site(a); return `<tr><td>${esc(a.name)}${x.note ? `<div class="faint" style="font-size:12px">${x.note}</div>` : ''}</td><td>${nf(a.kwp, 2)} kWp</td><td>${a.ac_max_kw ? `${nf(a.ac_max_kw, 1)} kW` : '–'}</td><td>${nf(x.tilt, 0)}°</td><td>${nf(x.az, 0)}°</td></tr>`; });
+    const multi = arrays.some((a) => a.planes.length > 1);
+    modal({
+      title: 'Solcast einrichten',
+      wide: true,
+      body: `<p class="explain">Solcast berechnet PV-Prognosen aus Satellitenbildern und gilt als eine der genauesten Quellen. Der Hobby-Zugang ist kostenlos: bis zu <b>2 Dachflächen</b> und <b>10 Abrufe am Tag</b>.</p>
+        <ol class="guide">
+          <li><b>Kostenlos registrieren</b> – auf der Solcast-Seite die Anmeldung starten und als Kontotyp <b>Home User / Hobbyist</b> wählen.<div class="row wrap" style="gap:8px;margin-top:8px"><a class="btn sm primary" href="${SOLCAST_SIGNUP}" target="_blank" rel="noopener">${ic('external')}Zur Solcast-Anmeldung</a></div></li>
+          <li><b>Dachfläche anlegen</b> – im <a href="${SOLCAST_TOOLKIT}" target="_blank" rel="noopener">Solcast Toolkit</a> eine neue Rooftop-Site anlegen, den Standort auf der Karte setzen und diese Werte eintragen:
+            ${rows.length ? `<div class="table-wrap" style="margin-top:8px"><table class="table"><thead><tr><th>Anlage</th><th>Leistung DC</th><th>Wechselrichter AC</th><th>Neigung</th><th>Azimut (Solcast)</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>` : '<p class="muted">Lege zuerst deine PV-Anlagen in EnergyPilot an – dann stehen hier die passenden Werte.</p>'}
+            <p class="hint" style="margin-top:6px">Achtung: Solcast zählt den Azimut anders als EnergyPilot – Norden 0°, Osten −90°, Westen 90°, Süden 180°. Die Tabelle ist schon umgerechnet. Wechselrichter AC nur eintragen, wenn bekannt – sonst die DC-Leistung.${multi ? ' Solcast kennt pro Site nur eine Ausrichtung, deshalb steht hier je Anlage eine Site mit der Gesamtleistung. Gleich große Ost- und West-Flächen erzeugen über den Tag fast wie eine flache Fläche.' : ''}</p></li>
+          <li><b>Resource-ID übernehmen</b> – jede Site hat eine ID der Form <span class="mono">xxxx-xxxx-xxxx-xxxx</span>. Trage sie unter Einstellungen › PV-Anlagen bei der passenden Anlage ein (Erweitert).</li>
+          <li><b>API-Schlüssel eintragen</b> – im Toolkit unter deinem Konto den API-Key kopieren, hier im Feld „API-Schlüssel“ einfügen und speichern.</li>
+        </ol>
+        <p class="explain" style="margin-top:12px">Solcast hat kein Prognose-Archiv: Vergleiche im Prognose-Check gibt es erst ab dem Tag der Einrichtung, das Lernmodell bezieht die Quelle nach wenigen sonnigen Tagen mit ein und gewichtet sie mit jeder Woche genauer.</p>`,
+      foot: '<a class="btn" href="#/settings?tab=arrays" data-close>PV-Anlagen öffnen</a><button class="btn primary" data-close>Schließen</button>',
+    });
+  }
+
   async function renderSources(el) {
     setHeader('Einstellungen', 'Welche Prognosen gesammelt und verglichen werden');
     const s = S.settings.sources;
@@ -1450,7 +1485,8 @@
           <div class="field"><label>API-Schlüssel</label><input class="input mono" id="s_sckey" type="password" autocomplete="off" placeholder="${s.has_solcast_key ? 'gespeichert – leer lassen, um ihn zu behalten' : 'von toolkit.solcast.com.au'}"></div>
           <div class="field"><label>Abrufzeiten (Uhr)</label><input class="input" id="s_schours" value="${esc(s.solcast_hours.join(', '))}"><span class="hint">Pro Zeitpunkt ein Abruf je Anlage. Der Hobby-Zugang erlaubt 10 Abrufe am Tag – bei 2 Anlagen also höchstens 5 Zeitpunkte.</span></div>
           <p class="explain">Die Resource-ID jeder Dachfläche trägst du bei der jeweiligen PV-Anlage ein (Erweitert).</p>
-          ${s.has_solcast_key ? `<button class="btn sm" id="s_scclear">${ic('trash')}Schlüssel entfernen</button>` : ''}</div></div>
+          <div class="row wrap" style="gap:8px"><button class="btn sm" id="s_schelp">${ic('info')}Anleitung</button><a class="btn sm" href="${SOLCAST_TOOLKIT}" target="_blank" rel="noopener">${ic('external')}Solcast Toolkit</a>
+          ${s.has_solcast_key ? `<button class="btn sm" id="s_scclear">${ic('trash')}Schlüssel entfernen</button>` : ''}</div></div></div>
       <div class="card"><div class="card-head"><div class="avatar accent">${ic('database')}</div><h2>Rückblick</h2></div>
         <div class="card-body"><div class="field"><label>Tage rückwirkend laden</label><input class="input" id="s_back" type="number" min="0" max="730" value="${S.settings.backfill_days}"><span class="hint">Messwerte aus der Langzeitstatistik von Home Assistant und archivierte Wettermodell-Prognosen. Erhöhen lädt die fehlenden Tage nach.</span></div></div></div>
     </div>
@@ -1464,6 +1500,7 @@
       },
       backfill_days: Number($('#s_back').value),
     }).then((ok) => { if (ok) renderSources(el); })));
+    $('#s_schelp').addEventListener('click', solcastGuide);
     if ($('#s_scclear')) $('#s_scclear').addEventListener('click', () => saveSettings({ sources: { solcast_clear: true } }, 'Solcast-Schlüssel entfernt.').then(() => renderSources(el)));
   }
 

@@ -505,6 +505,7 @@ svg.i.flip { transform: scaleX(-1); }
 :root {
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
   --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+  --s9: #0f8fa6; --s10: #9a6a2f;
   --s-other: #8392a8;
   --measured: #475569;
   --price: #2a78d6;
@@ -514,13 +515,13 @@ svg.i.flip { transform: scaleX(-1); }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
-    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767; --s9: #2bb0c7; --s10: #c08a4a;
     --s-other: #6d7c98; --measured: #a7b3c9; --price: #3987e5; --price-neg: #199e70; --pv: #c98500;
   }
 }
 :root[data-theme="dark"] {
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
-  --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+  --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767; --s9: #2bb0c7; --s10: #c08a4a;
   --s-other: #6d7c98; --measured: #a7b3c9; --price: #3987e5; --price-neg: #199e70; --pv: #c98500;
 }
 
@@ -577,6 +578,9 @@ svg.i.flip { transform: scaleX(-1); }
 .models { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px 16px; margin: 12px 0 4px; }
 .explain { font-size: 13px; color: var(--text-2); margin: 0 0 12px; }
 .explain b { color: var(--text); }
+ol.guide { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 12px; font-size: 13.5px; color: var(--text-2); }
+ol.guide b { color: var(--text); }
+ol.guide .table td, ol.guide .table th { padding: 7px 10px; }
 .plane-head, .plane-row { display: grid; grid-template-columns: 1fr 1fr 1.6fr 34px; gap: 8px; align-items: center; }
 .plane-head { font-size: 11.5px; color: var(--text-3); font-weight: 600; }
 .plane-row { margin-bottom: 2px; }

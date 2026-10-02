@@ -29,9 +29,13 @@ OPEN_METEO_MODELS = {
     "gfs_seamless": "NOAA GFS",
     "meteofrance_seamless": "Météo-France",
     "knmi_seamless": "KNMI Harmonie",
+    "dmi_seamless": "DMI Harmonie",
     "ukmo_seamless": "UK Met Office",
 }
-DEFAULT_MODELS = ["best_match", "icon_d2", "icon_eu", "ecmwf_ifs025", "gfs_seamless", "meteofrance_seamless"]
+DEFAULT_MODELS = ["best_match", "icon_d2", "icon_eu", "ecmwf_ifs025", "gfs_seamless", "meteofrance_seamless",
+                  "knmi_seamless", "dmi_seamless"]
+# defaults up to 0.9.1 - models added to the defaults later are switched on once for existing installations
+_LEGACY_DEFAULT_MODELS = ["best_match", "icon_d2", "icon_eu", "ecmwf_ifs025", "gfs_seamless", "meteofrance_seamless"]
 
 
 @dataclass
@@ -69,6 +73,7 @@ DEFAULT_SETTINGS: dict = {
     "sources": {
         "open_meteo": True,
         "models": list(DEFAULT_MODELS),
+        "models_offered": list(DEFAULT_MODELS),  # default models this installation has already been given
         "forecast_solar": True,
         "solcast_key": "",
         "solcast_hours": [6, 10, 13, 16],  # local hours; hobbyist accounts have 10 calls/day
@@ -214,9 +219,14 @@ class Settings:
         except (OSError, ValueError) as err:
             _LOGGER.warning("Could not read %s: %s", self._path, err)
             return
-        self._merge(raw)
+        if self._merge(raw):
+            try:
+                self._save()
+            except OSError as err:
+                _LOGGER.warning("Could not write %s: %s", self._path, err)
 
-    def _merge(self, raw: dict) -> None:
+    def _merge(self, raw: dict) -> bool:
+        """Take over stored settings; True when they were migrated and should be written back."""
         for key, default in DEFAULT_SETTINGS.items():
             if key not in raw:
                 continue
@@ -226,6 +236,15 @@ class Settings:
                 self.data["arrays"] = [clean_array(a, {**_ARRAY_DEFAULTS, "id": a.get("id") or uuid.uuid4().hex[:8]}) for a in raw["arrays"]]
             else:
                 self.data[key] = raw[key]
+        # a model new in the defaults is switched on once; switched off by the user, it stays off
+        src = self.data["sources"]
+        stored = (raw.get("sources") or {}).get("models_offered")
+        offered = stored or _LEGACY_DEFAULT_MODELS
+        new = [m for m in DEFAULT_MODELS if m not in offered and m not in src["models"]]
+        if new:
+            src["models"] = [m for m in OPEN_METEO_MODELS if m in src["models"] or m in new]
+        src["models_offered"] = list(DEFAULT_MODELS)
+        return stored != src["models_offered"]
 
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)

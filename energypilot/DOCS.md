@@ -67,7 +67,7 @@ Dann zeigt der Prognose-Check sogar, welches Modell Osten und Westen jeweils bes
 
 | Quelle | Kosten | Zeitraum | Archiv |
 |---|---|---|---|
-| Open-Meteo: DWD ICON-D2, ICON-EU, ECMWF, GFS, Météo-France, KNMI, UK Met Office, „Auto“ | kostenlos | bis 3 Tage | ja |
+| Open-Meteo: DWD ICON-D2, ICON-EU, ECMWF, GFS, Météo-France, KNMI Harmonie, DMI Harmonie, UK Met Office, „Auto“ | kostenlos | bis 3 Tage | ja |
 | Forecast.Solar | kostenlos (12 Abrufe/Stunde, ein Abruf je Teilfläche) | heute + morgen | nein |
 | Solcast (Hobby-Zugang) | kostenlos mit Anmeldung (10 Abrufe/Tag) | 3 Tage | nein |
 
@@ -76,6 +76,16 @@ Diffusstrahlung wird auf die Modulebene umgerechnet (Hay-Davies-Modell, Sonnenst
 10-Minuten-Schritten), danach werden Temperaturverluste und der Systemwirkungsgrad abgezogen. Wenn du
 die Teilflächen einer Anlage änderst, berechnet EnergyPilot alle gespeicherten Prognosen
 sofort neu.
+
+Standardmäßig sind alle Modelle außer UK Met Office aktiv – dessen Feinmodell deckt nur Großbritannien ab.
+KNMI Harmonie und DMI Harmonie rechnen wie ICON-D2 mit 2 km Auflösung und decken Mitteleuropa bzw.
+Nordwesteuropa ab. Welches Modell an deinem Standort am besten trifft, zeigt der Prognose-Check; schwache
+Modelle kannst du abschalten, das Lernmodell gewichtet sie ohnehin nach ihrem bisherigen Fehler.
+
+**Solcast einrichten:** Unter Einstellungen › Prognosequellen führt der Knopf „Anleitung“ durch die
+Anmeldung (Hobby-Zugang, kostenlos, bis 2 Dachflächen) und zeigt für jede Anlage die Werte, die du bei
+Solcast einträgst – mit dem Azimut schon in der Zählweise von Solcast (Norden 0°, Osten −90°, Westen 90°,
+Süden 180°). Danach die Resource-ID bei der PV-Anlage und den API-Schlüssel bei den Prognosequellen eintragen.
 
 ### Prognose-Horizonte
 

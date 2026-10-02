@@ -12,7 +12,7 @@ echten Messwerten nachgerechnet.
 
 **Prognosen**
 - **Mehrere PV-Anlagen** mit eigenem Messsensor, auch mit mehreren Ausrichtungen an einem Wechselrichter (z. B. Ost-West)
-- **Prognosequellen:** DWD ICON-D2 und ICON-EU, ECMWF, NOAA GFS, Météo-France und weitere über Open-Meteo (kostenlos), Forecast.Solar, optional Solcast
+- **Prognosequellen:** DWD ICON-D2 und ICON-EU, ECMWF, NOAA GFS, Météo-France, KNMI Harmonie, DMI Harmonie und weitere über Open-Meteo (kostenlos), Forecast.Solar, optional Solcast
 - **Eigene, lernende PV-Prognose:** gewichtet die Quellen nach ihrer Treffsicherheit bei deinen Anlagen und lernt Verschattung und Abregelung getrennt für Sonne und Wolken; Spanne (P10–P90) und Live-Korrektur nach der Erzeugung der letzten Stunde
 - **Verbrauchsprognose** für den Grundverbrauch (ohne E-Auto und Heizstab) nach Uhrzeit, Werktag/Wochenende/Feiertag, Temperatur und aktuellem Verbrauchsniveau
 - **Sofortiger Rückblick:** Messwerte aus der Langzeitstatistik von Home Assistant und archivierte Modellprognosen der letzten 90 Tage – die Rangliste steht nach wenigen Minuten

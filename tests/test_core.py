@@ -153,6 +153,23 @@ def test_clean_array_limits_and_entity(tmp_path):
     assert again.public()["sources"]["has_solcast_key"]
 
 
+def test_new_default_models_are_switched_on_once(tmp_path):
+    path = tmp_path / "s.json"
+    # settings of 0.9.1: ICON-D2 and GFS switched off by the user, no "models_offered" yet
+    path.write_text('{"sources": {"models": ["best_match", "icon_eu", "ecmwf_ifs025", "meteofrance_seamless"]}}', "utf-8")
+    s = Settings(path)
+    assert s.data["sources"]["models"] == ["best_match", "icon_eu", "ecmwf_ifs025", "meteofrance_seamless",
+                                           "knmi_seamless", "dmi_seamless"]
+    s.update({"sources": {"models": ["best_match", "icon_eu", "dmi_seamless"]}})  # the user turns KNMI off again
+    assert Settings(path).data["sources"]["models"] == ["best_match", "icon_eu", "dmi_seamless"]
+
+
+def test_solcast_azimuth_conversion_matches_ui():
+    # same formula as solcastAzimuth() in app.js: north 0, east -90, west 90, south 180
+    conv = lambda az: (lambda v: 180 if v == -180 else v)(((540 - az) % 360) - 180)  # noqa: E731
+    assert [conv(a) for a in (0, 90, 180, 270, 135)] == [0, -90, 180, 90, -135]
+
+
 def test_settings_of_version_010_are_migrated(tmp_path):
     path = tmp_path / "s.json"
     path.write_text('{"arrays": [{"id": "abc", "name": "Alt", "kwp": 6, "tilt": 25, "azimuth": 200, '
