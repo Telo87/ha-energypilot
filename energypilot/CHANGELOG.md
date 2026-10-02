@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.3
+
+- Solcast: Eine neu eingetragene Resource-ID oder ein neuer API-Schlüssel wird jetzt sofort abgerufen – bisher konnte es bis zur nächsten Stunde dauern, wenn die ID nach dem Schlüssel eingetragen wurde. Weiterhin höchstens ein Abruf pro Dachfläche und Stunde
+- Solcast: Bei zwei Anlagen verdeckte ein erfolgreicher Abruf den Fehler der anderen – der Status nennt jetzt jede Anlage, bei der der Abruf fehlschlägt
+- Einrichtung: Hinweise, wenn bei Solcast nur der Schlüssel oder nur die Resource-ID eingetragen ist (dann wurde bisher stillschweigend nichts abgerufen), wenn eine Anlage keine Resource-ID hat und solange der erste Abruf aussteht
+- Übersicht › Datenquellen: „learn“ heißt jetzt „Lernmodell – berechnet vor …“
+
 ## 0.9.2
 
 - Neues Wettermodell **DMI Harmonie** (2 km, Nordwesteuropa). Es ist zusammen mit **KNMI Harmonie** (2 km) jetzt standardmäßig aktiv; bei bestehenden Installationen werden beide einmalig eingeschaltet, ihr Prognose-Archiv wird automatisch nachgeladen. Wer eines davon wieder abschaltet, behält diese Wahl

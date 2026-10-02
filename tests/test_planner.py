@@ -577,3 +577,54 @@ def test_journal_includes_the_grid_floor_of_the_storage(tmp_path):
     assert j["grid_floor_wh"] == 30
     day = next(d for d in j["days"] if d["hours"])
     assert day["bills"]["base"]["import_kwh"] == pytest.approx(day["bills"]["real"]["import_kwh"], abs=0.01)
+
+
+def test_solcast_needs_key_and_id_and_fetches_new_sites_at_once(tmp_path, monkeypatch):
+    import asyncio
+
+    from energypilot import setupcheck
+    from energypilot.hub import solcast as sc_mod
+
+    settings = Settings(tmp_path / "s.json")
+    settings.update({"location": {"latitude": 52, "longitude": 9},
+                     "sources": {"open_meteo": False, "forecast_solar": False, "solcast_key": "k1", "solcast_hours": [6]}})
+    arr = settings.upsert_array({"name": "Dach", "planes": [{"kwp": 5}]})
+
+    class FakeHA(HomeAssistant):
+        available = True
+
+        async def states(self):
+            return []
+
+        async def statistics_metadata(self, ids):
+            return {}
+
+    hub = Hub(Options(), settings, Database(tmp_path / "x.db"), FakeHA())
+    calls = []
+
+    async def fake_fetch(session, key, rid):
+        calls.append((key, rid))
+        return {}
+
+    monkeypatch.setattr(sc_mod, "fetch", fake_fetch)
+
+    def titles():
+        rep = asyncio.run(setupcheck.run(hub))
+        return {c["title"] for g in rep["groups"] for c in g["checks"]}
+
+    assert "Solcast: keine Resource-ID eingetragen" in titles()
+    asyncio.run(hub.fetch_forecasts())
+    assert calls == []  # nothing to fetch without a resource id
+
+    settings.upsert_array({"id": arr["id"], "solcast_id": "abcd-1234"})
+    assert "Solcast wartet auf den ersten Abruf" in titles()
+    asyncio.run(hub.fetch_forecasts())
+    asyncio.run(hub.fetch_forecasts())
+    assert calls == [("k1", "abcd-1234")]  # at once, but only once per hour
+    assert hub.status["sc"]["ok"]
+    settings.update({"sources": {"solcast_key": "k2"}})
+    asyncio.run(hub.fetch_forecasts())
+    assert calls[-1] == ("k2", "abcd-1234")  # a new key is tried right away
+
+    settings.update({"sources": {"solcast_clear": True}})
+    assert "Solcast: API-Schlüssel fehlt" in titles()

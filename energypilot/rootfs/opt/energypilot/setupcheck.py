@@ -321,6 +321,23 @@ async def run(hub: Hub) -> dict:
     enabled = s["sources"]["open_meteo"] and s["sources"]["models"] or s["sources"]["forecast_solar"] or s["sources"].get("solcast_key")
     if not enabled:
         fc.append(_c("err", "Keine Prognosequelle aktiv", "", LINK["sources"]))
+    # Solcast needs both: the key under sources and a resource id per array - one without the other does nothing
+    sc_ids = [a for a in s["arrays"] if a.get("solcast_id")]
+    if s["sources"].get("solcast_key") and not sc_ids:
+        fc.append(_c("warn", "Solcast: keine Resource-ID eingetragen",
+                     "Der API-Schlüssel ist gespeichert, aber bei keiner PV-Anlage ist eine Resource-ID eingetragen – "
+                     "so wird Solcast nicht abgerufen.", LINK["arrays"]))
+    elif sc_ids and not s["sources"].get("solcast_key"):
+        fc.append(_c("warn", "Solcast: API-Schlüssel fehlt",
+                     f"Bei {', '.join(a['name'] for a in sc_ids)} ist eine Resource-ID eingetragen, aber kein API-Schlüssel gespeichert.",
+                     LINK["sources"]))
+    elif sc_ids:
+        missing = [a["name"] for a in s["arrays"] if a["kwp"] > 0 and not a.get("solcast_id")]
+        if missing:
+            fc.append(_c("info", f"Solcast nur für {len(sc_ids)} Anlage(n)",
+                         f"Ohne Resource-ID: {', '.join(missing)} (der Hobby-Zugang erlaubt 2 Dachflächen)."))
+        if "sc" not in hub.status:
+            fc.append(_c("info", "Solcast wartet auf den ersten Abruf", "Er folgt innerhalb weniger Minuten."))
     for key, stt in sorted(hub.status.items()):
         if key.startswith(("om:", "fs", "sc")):
             if stt["ok"]:

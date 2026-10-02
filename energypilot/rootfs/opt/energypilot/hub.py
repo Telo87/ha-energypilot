@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from collections import defaultdict, deque
@@ -35,6 +36,7 @@ def source_label(key: str) -> str:
     return {
         "fs": "Forecast.Solar",
         "sc": "Solcast",
+        "learn": "Lernmodell",
         learn.PV_SOURCE: "EnergyPilot (lernend)",
         learn.NOWCAST_SOURCE: "EnergyPilot (live korrigiert)",
         learn.NAIVE_SOURCE: "Wie vor einer Woche",
@@ -57,7 +59,8 @@ class Hub:
         self._tasks: list[asyncio.Task] = []
         self._wake = asyncio.Event()
         self._busy = asyncio.Lock()
-        self._solcast_slots: set[str] = set()
+        # Solcast: hour slot of the last call per site and key - the hobbyist account has 10 calls a day
+        self._solcast_done: dict[str, str] = {}
         # Forecast.Solar allows 12 calls per hour and IP: at most one fetch per array and hour,
         # and a break of one hour after "rate limit" (instead of asking again and again)
         self._fs_last: dict[str, float] = {}
@@ -321,21 +324,29 @@ class Hub:
                 self.mark("fs", not errors, "; ".join(errors), count=count)
 
         key = src.get("solcast_key")
-        slot = datetime.fromtimestamp(now, self.tz).strftime("%Y-%m-%d-%H")
-        if key and slot not in self._solcast_slots:
-            local_hour = datetime.fromtimestamp(now, self.tz).hour
-            if local_hour in src["solcast_hours"] or not self.status.get("sc", {}).get("last_ok"):
-                self._solcast_slots.add(slot)
-                for cfg, _arr in arrays:
-                    if not cfg.get("solcast_id"):
-                        continue
-                    try:
-                        hours = await solcast.fetch(self.session, key, cfg["solcast_id"])
-                    except SourceError as err:
-                        self.mark("sc", False, f"{cfg['name']}: {err}")
-                        continue
-                    self.db.put_forecast(self._direct_rows("sc", cfg["id"], hours, now))
-                    self.mark("sc", True, count=len(hours))
+        local = datetime.fromtimestamp(now, self.tz)
+        slot = local.strftime("%Y-%m-%d-%H")
+        asked, errors, count = False, [], 0
+        for cfg, _arr in arrays:
+            if not key or not cfg.get("solcast_id"):
+                continue
+            # at the chosen hours; a new site or key (and the first run) right away, never twice an hour
+            site = f"{cfg['solcast_id']}:{hashlib.sha256(key.encode()).hexdigest()[:12]}"
+            last = self._solcast_done.get(site)
+            if last == slot or (last and local.hour not in src["solcast_hours"]):
+                continue
+            self._solcast_done[site] = slot
+            asked = True
+            try:
+                hours = await solcast.fetch(self.session, key, cfg["solcast_id"])
+            except SourceError as err:
+                errors.append(f"{cfg['name']}: {err}")
+                continue
+            self.db.put_forecast(self._direct_rows("sc", cfg["id"], hours, now))
+            count += len(hours)
+        # one status for all arrays: a later success must not hide the failure of another array
+        if asked:
+            self.mark("sc", not errors, "; ".join(errors), count=count)
 
     def _direct_rows(self, source: str, array_id: str, hours: dict[int, float], now: float) -> list[tuple]:
         return [
