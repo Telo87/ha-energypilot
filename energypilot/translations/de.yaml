@@ -5,3 +5,11 @@ configuration:
   log_level:
     name: Protokollierungsstufe
     description: Detailgrad der Add-on-Protokolle.
+  direct_password:
+    name: Passwort für den Direktzugriff
+    description: >-
+      Leer = EnergyPilot ist nur über Home Assistant erreichbar. Mit Passwort und einem unter „Netzwerk“
+      freigegebenen Port lässt es sich direkt öffnen (http://<Adresse von Home Assistant>:<Port>) und auf dem
+      Handy als App zum Home-Bildschirm hinzufügen. Nur im Heimnetz oder über VPN nutzen.
+network:
+  8099/tcp: Direktzugriff ohne Home Assistant (nur mit Passwort)

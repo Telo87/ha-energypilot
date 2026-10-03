@@ -5,3 +5,11 @@ configuration:
   log_level:
     name: Log level
     description: Level of detail of the add-on logs.
+  direct_password:
+    name: Password for direct access
+    description: >-
+      Empty = EnergyPilot is only reachable through Home Assistant. With a password and a port opened under
+      "Network" it can be opened directly (http://<address of Home Assistant>:<port>) and added to the phone's
+      home screen as an app. Use it only in the home network or through a VPN.
+network:
+  8099/tcp: Direct access without Home Assistant (password only)

@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import logging
+import os
 import re
 import time
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
 from aiohttp import web
 
 from . import __version__, analysis, learn
-from .config import OPEN_METEO_MODELS, Options
+from .config import DATA_DIR, OPEN_METEO_MODELS, Options
 from .ha import HAError
 from .hub import GEOMETRY_KEYS, POWER_UNITS, Hub
 
@@ -54,11 +58,57 @@ def _series(value: str | None, hub: Hub) -> str:
     return value if value in ids else analysis.TOTAL
 
 
+# ---------------------------------------------------------------- direct access
+# Next to ingress EnergyPilot can be opened on its own port (e.g. as an app on the phone). Ingress is
+# protected by Home Assistant's login; the direct way needs the password from the add-on options.
+SESSION_COOKIE = "energypilot_session"
+SESSION_DAYS = 365
+OPEN_PATHS = ("/static/", "/manifest.json", "/login")  # nothing secret: styles, icons, the login itself
+LOGIN_TRIES = 5  # failed logins per address ...
+LOGIN_WINDOW = 300  # ... within this many seconds
+_failed: dict[str, list[float]] = defaultdict(list)
+
+
+def _secret() -> bytes:
+    """Random key of this installation - the session cookie cannot be forged from the password alone."""
+    path = DATA_DIR / "direct.key"
+    try:
+        return bytes.fromhex(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        key = os.urandom(32)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(key.hex(), encoding="utf-8")
+            os.chmod(path, 0o600)
+        except OSError as err:
+            _LOGGER.warning("Could not write %s: %s", path, err)
+        return key
+
+
+def session_token(app: web.Application) -> str:
+    """Value of the session cookie; changes with the password, so a new password logs everybody out."""
+    options: Options = app["options"]
+    return hmac.new(app["secret"], options.direct_password.encode(), hashlib.sha256).hexdigest()
+
+
+def _login_page(error: str = "", status: int = 401) -> web.Response:
+    html = (STATIC / "login.html").read_text(encoding="utf-8").replace("{{VERSION}}", __version__)
+    html = html.replace("{{ERROR}}", f'<p class="err">{error}</p>' if error else "")
+    return web.Response(text=html, status=status, content_type="text/html", headers={"Cache-Control": "no-store"})
+
+
 @web.middleware
 async def guard(request: web.Request, handler):
     options: Options = request.app["options"]
     if not options.allow_all and request.remote != INGRESS_PROXY:
-        return web.Response(status=403, text="Nur über Home Assistant Ingress erreichbar.")
+        if not options.direct_password:
+            return web.Response(status=403, text="EnergyPilot ist nur über Home Assistant erreichbar. Für den "
+                                "Direktzugriff in den Add-on-Optionen ein Passwort setzen.")
+        cookie = request.cookies.get(SESSION_COOKIE, "")
+        if not request.path.startswith(OPEN_PATHS) and not hmac.compare_digest(cookie.encode(), session_token(request.app).encode()):
+            if request.path.startswith("/api/"):
+                return web.json_response({"ok": False, "error": "Nicht angemeldet."}, status=401)
+            return _login_page()
     try:
         response = await handler(request)
         if request.path.startswith("/static/"):
@@ -79,6 +129,44 @@ async def guard(request: web.Request, handler):
 async def index(request: web.Request) -> web.Response:
     html = (STATIC / "index.html").read_text(encoding="utf-8").replace("{{VERSION}}", __version__)
     return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-cache"})
+
+
+@routes.get("/manifest.json")
+async def manifest(request: web.Request) -> web.Response:
+    """Web app manifest: "add to home screen" starts EnergyPilot full screen like an app."""
+    return web.json_response({
+        "name": "EnergyPilot", "short_name": "EnergyPilot", "lang": "de",
+        "start_url": "./", "scope": "./", "display": "standalone",
+        "background_color": "#f3f5f9", "theme_color": "#f59e0b",
+        "icons": [{"src": f"static/icon-{n}.png", "sizes": f"{n}x{n}", "type": "image/png"} for n in (180, 512)],
+    }, content_type="application/manifest+json")
+
+
+@routes.post("/login")
+async def login(request: web.Request) -> web.Response:
+    options: Options = request.app["options"]
+    if not options.direct_password:
+        raise web.HTTPNotFound()
+    now = time.time()
+    who = request.remote or "?"
+    _failed[who] = [t for t in _failed[who] if now - t < LOGIN_WINDOW]
+    if len(_failed[who]) >= LOGIN_TRIES:
+        return _login_page("Zu viele Versuche – bitte in ein paar Minuten noch einmal.", 429)
+    form = await request.post()
+    if not hmac.compare_digest(str(form.get("password", "")).encode(), options.direct_password.encode()):
+        _failed[who].append(now)
+        _LOGGER.warning("Direktzugriff: falsches Passwort von %s", who)
+        return _login_page("Das Passwort stimmt nicht.")
+    _failed.pop(who, None)
+    response = web.Response(status=303, headers={"Location": "./"})
+    response.set_cookie(SESSION_COOKIE, session_token(request.app), max_age=SESSION_DAYS * 86400,
+                        httponly=True, samesite="Lax", path="/")
+    return response
+
+
+@routes.get("/login")
+async def login_form(request: web.Request) -> web.Response:
+    return web.Response(status=303, headers={"Location": "./"})
 
 
 @routes.get("/api/overview")
@@ -307,12 +395,17 @@ async def entities(request: web.Request) -> web.Response:
     return _ok(out)
 
 
-def create_app(options: Options, hub: Hub) -> web.Application:
+def create_app(options: Options, hub: Hub, start: bool = True) -> web.Application:
     app = web.Application(middlewares=[guard])
     app["options"] = options
     app["hub"] = hub
     app.add_routes(routes)
     app.router.add_static("/static", STATIC)
+    if options.direct_password:
+        app["secret"] = _secret()
+        _LOGGER.info("Direktzugriff mit Passwort ist aktiv (Port unter „Netzwerk“ freigeben)")
+    if not start:  # tests: the web server without fetching and planning
+        return app
 
     async def on_startup(_app: web.Application) -> None:
         await hub.start()

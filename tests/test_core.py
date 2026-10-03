@@ -243,3 +243,39 @@ def test_prices_never_overlap(tmp_path):
     assert db.prices(0, 10 * 3600) == [(3600, 3600, 50.0)]
     db.put_prices([(3600 + q * 900, 900, 80.0) for q in range(4)])  # quarter hours again
     assert [r[1] for r in db.prices(0, 10 * 3600)] == [900] * 4
+
+
+def test_direct_access_needs_the_password(tmp_path, monkeypatch):
+    import asyncio
+
+    from aiohttp.test_utils import TestClient, TestServer
+    from energypilot import server
+
+    monkeypatch.setattr(server, "DATA_DIR", tmp_path)
+    server._failed.clear()
+
+    async def run(password):
+        opts = Options(publish_sensors=False, direct_password=password, allow_all=False)
+        hub = Hub(opts, Settings(tmp_path / "s.json"), Database(tmp_path / f"x{len(password)}.db"), HomeAssistant())
+        async with TestClient(TestServer(server.create_app(opts, hub, start=False))) as c:
+            out = {"page": (await c.get("/")).status, "api": (await c.get("/api/settings")).status,
+                   "icon": (await c.get("/static/icon-180.png")).status, "manifest": (await c.get("/manifest.json")).status}
+            if password:
+                wrong = await c.post("/login", data={"password": "nope"}, allow_redirects=False)
+                right = await c.post("/login", data={"password": password}, allow_redirects=False)
+                out |= {"wrong": wrong.status, "right": right.status, "cookie": server.SESSION_COOKIE in right.cookies,
+                        "after": (await c.get("/api/settings")).status, "page_after": (await c.get("/")).status}
+                c.session.cookie_jar.clear()
+                tries = [(await c.post("/login", data={"password": "x"}, allow_redirects=False)).status for _ in range(6)]
+                out["locked"] = tries[-1]
+                out["locked_right"] = (await c.post("/login", data={"password": password}, allow_redirects=False)).status
+            return out
+
+    off = asyncio.run(run(""))
+    assert off["page"] == 403 and off["api"] == 403  # without a password only ingress may talk to the add-on
+    on = asyncio.run(run("geheim"))
+    assert on["page"] == 401 and on["api"] == 401  # login page / JSON error
+    assert on["icon"] == 200 and on["manifest"] == 200  # needed for "add to home screen"
+    assert on["wrong"] == 401 and on["right"] == 303 and on["cookie"]
+    assert on["after"] == 200 and on["page_after"] == 200
+    assert on["locked"] == 429 and on["locked_right"] == 429  # guessing is slowed down

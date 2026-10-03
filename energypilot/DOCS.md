@@ -254,6 +254,25 @@ Einfacher geht es mit **„Aufschlag aus einem Preis berechnen“**: einen oder 
 App des Stromanbieters (viertelstündlicher Preis) mit Tag und Uhrzeit eintragen. EnergyPilot
 rechnet `Preis ÷ (1 + MwSt) − Börsenpreis` für jede Viertelstunde aus und übernimmt den Mittelwert.
 
+## Als App auf dem Handy (Direktzugriff)
+
+Über Home Assistant bleibt dessen Kopfzeile mit dem Menü immer sichtbar. Wer EnergyPilot wie eine eigene
+App nutzen möchte, schaltet den Direktzugriff ein:
+
+1. Add-on › **Konfiguration**: ein **Passwort für den Direktzugriff** eintragen.
+2. Auf derselben Seite unter **Netzwerk** einen Port eintragen (z. B. 8099) und speichern; das Add-on startet neu.
+3. Auf dem Handy im Browser `http://<Adresse von Home Assistant>:<Port>` öffnen, z. B.
+   `http://homeassistant.local:8099`, und mit dem Passwort anmelden.
+4. **iPhone (Safari):** Teilen-Symbol › „Zum Home-Bildschirm“. **Android (Chrome):** Menü › „Zum Startbildschirm
+   hinzufügen“ bzw. „App installieren“.
+
+Vom Home-Bildschirm startet EnergyPilot im Vollbild. Die App fragt das Passwort beim ersten Start noch einmal ab
+und merkt es sich dann.
+
+Der Direktzugriff ist unverschlüsselt (http) und nur durch das Passwort geschützt – er ist für das Heimnetz und
+für VPN-Verbindungen gedacht. Den Port nicht im Router ins Internet freigeben. Über Home Assistant Cloud ist
+er nicht erreichbar; dort bleibt der Weg über die Home-Assistant-App. Ohne Passwort ist der Direktzugriff aus.
+
 ## Sensoren in Home Assistant
 
 Mit der Option *Sensoren in Home Assistant anlegen* stellt EnergyPilot bereit:

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.0
+
+- **Als App auf dem Handy:** EnergyPilot lässt sich jetzt auch direkt öffnen – ohne die Oberfläche von Home Assistant – und auf dem Handy „zum Home-Bildschirm“ hinzufügen. Es startet dann im Vollbild mit eigenem Symbol. Dafür in der Konfiguration des Add-ons ein **Passwort für den Direktzugriff** setzen und unter „Netzwerk“ einen Port freigeben; beides ist standardmäßig aus, ohne Passwort bleibt EnergyPilot nur über Home Assistant erreichbar. Anleitung unter Einstellungen › Darstellung und in der Dokumentation
+- Der Direktzugriff fragt das Passwort einmal ab und merkt sich die Anmeldung auf dem Gerät; nach fünf falschen Versuchen ist die Anmeldung für einige Minuten gesperrt. Ein neues Passwort meldet alle Geräte ab
+
+## 0.10.1
+
+- Übersicht: „Warum?“ öffnet die Erklärung jetzt direkt auf der Übersicht, statt zur Planung zu wechseln
+
 ## 0.10.0
 
 Neues Aussehen der Übersicht, Handy-Ansicht und mehr Bewegung:

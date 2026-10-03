@@ -42,6 +42,8 @@ _LEGACY_DEFAULT_MODELS = ["best_match", "icon_d2", "icon_eu", "ecmwf_ifs025", "g
 class Options:
     publish_sensors: bool = True
     log_level: str = "info"
+    # direct access next to ingress (own port): only with this password, empty = off
+    direct_password: str = os.environ.get("ENERGYPILOT_DIRECT_PASSWORD", "")
     port: int = int(os.environ.get("ENERGYPILOT_PORT", "8099"))
     # Only the Supervisor ingress proxy may talk to us. ENERGYPILOT_ALLOW_ALL=1 for development.
     allow_all: bool = os.environ.get("ENERGYPILOT_ALLOW_ALL") == "1"
@@ -57,7 +59,7 @@ def load_options() -> Options:
         pass
     except (OSError, ValueError) as err:
         _LOGGER.warning("Could not read %s: %s", OPTIONS_FILE, err)
-    for key in ("publish_sensors", "log_level"):
+    for key in ("publish_sensors", "log_level", "direct_password"):
         if raw.get(key) is not None:
             setattr(opts, key, raw[key])
     # local development against a real Home Assistant must never overwrite the add-on's sensors

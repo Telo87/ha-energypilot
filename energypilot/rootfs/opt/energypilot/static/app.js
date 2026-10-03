@@ -188,6 +188,7 @@
     try { res = await fetch('api/' + path, init); } catch (e) { throw new Error('Keine Verbindung zum Add-on.'); }
     let data = null;
     try { data = await res.json(); } catch { /* not json */ }
+    if (res.status === 401) { location.reload(); throw new Error('Nicht angemeldet.'); }  // direct access: back to the login
     if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
     return data.data;
   }
@@ -551,7 +552,7 @@
           <div class="now-title"><span class="avatar big ${m[2]}">${ic(m[1])}</span>${esc(plan.label)}</div>
           <p class="muted">${esc(plan.text)}</p>
           ${modeLine}
-          <div class="row wrap" style="gap:8px"><span class="badge ${plan.buy_now ? 'accent' : ''}">Strom kaufen: ${plan.buy_now ? 'ja' : 'nein'}</span><a class="btn sm" href="#/plan">${ic('battery')}Zur Planung</a><a class="btn sm" href="#/plan?why=1">${ic('info')}Warum?</a></div></div>`
+          <div class="row wrap" style="gap:8px"><span class="badge ${plan.buy_now ? 'accent' : ''}">Strom kaufen: ${plan.buy_now ? 'ja' : 'nein'}</span><a class="btn sm" href="#/plan">${ic('battery')}Zur Planung</a><button type="button" class="btn sm" id="whyNow">${ic('info')}Warum?</button></div></div>`
         : `<div class="now-decision"><div class="now-kicker">Empfehlung jetzt</div><div class="now-title">Noch kein Plan</div><p class="muted">${esc((plan && plan.reason) || 'Wird berechnet …')}</p></div>`;
       const house = val('house');
       const notes = [
@@ -604,6 +605,7 @@
         chart($('#pvChart'), { xs, step: 3600, bar, lines: ln, band, fmt: (v) => fmtW(v).replace('W', 'Wh'), axisFmt: (v) => (v >= 1000 ? `${nf(v / 1000, 1)} kWh` : `${nf(v)} Wh`), head: (ts) => `${fmtDay(ts)} ${fmtHour(ts)}–${fmtHour(ts + 3600)}`, tick: (ts) => (new Date(ts * 1000).getHours() === 0 ? fmtDay(ts) : fmtHour(ts)), tickAt: (ts) => new Date(ts * 1000).getHours() % 6 === 0, height: 280, now: ov.now, noAnim: drawn, onClick: (i) => { location.hash = `#/day?d=${i < day.hours.length ? day.day : tomorrow.day}`; } });
         $$('.legend button[data-series]', el).forEach((b) => on(b, 'click', () => { toggleHidden(b.dataset.series, hidden); draw(S.overview); }));
       }
+      on($('#whyNow'), 'click', () => planWhy(S.overview.plan));  // explains in place, without leaving the overview
       priceChart($('#priceChart'), ov.prices, ov.now, 200, drawn);
       drawn = true;
     };
@@ -1842,7 +1844,16 @@
           <p class="faint" style="font-size:12.5px;margin:10px 0 0">„Automatisch“ folgt der Einstellung von Betriebssystem bzw. Browser.</p></div></div>
         <div class="card" style="margin-top:16px"><div class="card-head"><h2>Akzentfarbe</h2></div><div class="card-body">
           <div class="swatches">${Object.entries(ACCENTS).map(([k, a]) => `<button class="swatch ${accent === k ? 'active' : ''}" data-accent="${k}" style="--sw:${a[1]}" title="${esc(a[0])}" aria-pressed="${accent === k}"><i>${ic('check')}</i><span>${esc(a[0])}</span></button>`).join('')}</div>
-          <p class="faint" style="font-size:12.5px;margin:12px 0 0">Gilt für Schaltflächen und Hervorhebungen. Die Farben der Prognosequellen bleiben gleich, damit jede Quelle überall wiedererkennbar ist.</p></div></div>`;
+          <p class="faint" style="font-size:12.5px;margin:12px 0 0">Gilt für Schaltflächen und Hervorhebungen. Die Farben der Prognosequellen bleiben gleich, damit jede Quelle überall wiedererkennbar ist.</p></div></div>
+        <div class="card" style="margin-top:16px"><div class="card-head"><h2>Als App auf dem Handy</h2></div><div class="card-body">
+          <p class="explain">Über Home Assistant bleibt dessen Kopfzeile mit dem Menü sichtbar. Mit dem <b>Direktzugriff</b> startet EnergyPilot vom Home-Bildschirm wie eine eigene App – im Vollbild, mit eigenem Symbol.</p>
+          <ol class="guide">
+            <li><b>Passwort setzen</b> – in Home Assistant unter Einstellungen › Add-ons › EnergyPilot › Konfiguration ein „Passwort für den Direktzugriff“ eintragen.</li>
+            <li><b>Port freigeben</b> – auf derselben Seite unter „Netzwerk“ einen Port eintragen (z. B. 8099) und speichern. Das Add-on startet neu.</li>
+            <li><b>Im Browser des Handys öffnen</b> – <span class="mono">http://&lt;Adresse von Home Assistant&gt;:&lt;Port&gt;</span>, z. B. <span class="mono">http://homeassistant.local:8099</span>, und mit dem Passwort anmelden.</li>
+            <li><b>Zum Home-Bildschirm</b> – iPhone (Safari): Teilen-Symbol › „Zum Home-Bildschirm“. Android (Chrome): Menü › „Zum Startbildschirm hinzufügen“.</li>
+          </ol>
+          <p class="faint" style="font-size:12.5px;margin:12px 0 0">Der Direktzugriff ist nur durch das Passwort geschützt und unverschlüsselt – für das Heimnetz und VPN gedacht, den Port nicht im Router ins Internet freigeben. Ohne Passwort ist er ausgeschaltet.</p></div></div>`;
       $$('[data-theme-set]', el).forEach((b) => b.addEventListener('click', () => { setTheme(b.dataset.themeSet); draw(); }));
       $$('[data-accent]', el).forEach((b) => b.addEventListener('click', () => { store.set('accent', b.dataset.accent); withTransition(applyAccent); draw(); }));
     };
