@@ -563,13 +563,13 @@
       const next = (plan && plan.next) || [];
       const modeLine = next.length > 2 ? `<div class="mode-line" role="img" aria-label="Empfehlung der nächsten Stunden">${next.map((st) => `<i class="m-${st.mode}" title="${fmtHour(st.ts)} Uhr: ${MODE[st.mode][0]}"></i>`).join('')}</div>
           <div class="mode-ticks">${next.map((st, i) => `<span>${i % 3 === 0 ? fmtHour(st.ts) : ''}</span>`).join('')}</div>
-          <div class="mode-key">${Object.keys(MODE).filter((k) => next.some((st) => st.mode === k)).map((k) => `<span><i class="m-${k}"></i>${MODE[k][0]}</span>`).join('')}</div>` : '';
+          <div class="mode-key${new Set(next.map((st) => st.mode)).size < 2 ? ' single' : ''}">${Object.keys(MODE).filter((k) => next.some((st) => st.mode === k)).map((k) => `<span><i class="m-${k}"></i>${MODE[k][0]}</span>`).join('')}</div>` : '';
       const decision = m ? `<div class="now-decision m-${plan.decision}" data-flash="${plan.decision}">
           <div class="now-kicker">Empfehlung jetzt${plan.at ? ` <span class="faint" style="text-transform:none;letter-spacing:0;font-weight:500">· Stand ${fmtHour(plan.at)}</span>` : ''}</div>
           <div class="now-title"><span class="avatar big ${m[2]}">${ic(m[1])}</span>${esc(plan.label)}</div>
           <p class="muted">${esc(plan.text)}</p>
           ${modeLine}
-          <div class="row wrap" style="gap:8px"><span class="badge ${plan.buy_now ? 'accent' : ''}">Strom kaufen: ${plan.buy_now ? 'ja' : 'nein'}</span><a class="btn sm" href="#/plan">${ic('battery')}Zur Planung</a><button type="button" class="btn sm" id="whyNow">${ic('info')}Warum?</button></div></div>`
+          <div class="row wrap" style="gap:8px"><a class="btn sm" href="#/plan">${ic('battery')}Zur Planung</a><button type="button" class="btn sm" id="whyNow">${ic('info')}Warum?</button></div></div>`
         : `<div class="now-decision"><div class="now-kicker">Empfehlung jetzt</div><div class="now-title">Noch kein Plan</div><p class="muted">${esc((plan && plan.reason) || 'Wird berechnet …')}</p></div>`;
       const house = val('house');
       const notes = [
@@ -795,13 +795,13 @@
       const nextSteps = p.ok ? p.steps.slice(0, 12) : [];
       const strip = nextSteps.length > 2 ? `<div class="mode-line" role="img" aria-label="Empfehlung der nächsten Stunden">${nextSteps.map((st) => `<i class="m-${st.mode}" title="${fmtHour(st.ts)} Uhr: ${MODE[st.mode][0]}"></i>`).join('')}</div>
           <div class="mode-ticks">${nextSteps.map((st, i) => `<span>${i % 3 === 0 ? fmtHour(st.ts) : ''}</span>`).join('')}</div>
-          <div class="mode-key">${Object.keys(MODE).filter((k) => nextSteps.some((st) => st.mode === k)).map((k) => `<span><i class="m-${k}"></i>${MODE[k][0]}</span>`).join('')}</div>` : '';
+          <div class="mode-key${new Set(nextSteps.map((st) => st.mode)).size < 2 ? ' single' : ''}">${Object.keys(MODE).filter((k) => nextSteps.some((st) => st.mode === k)).map((k) => `<span><i class="m-${k}"></i>${MODE[k][0]}</span>`).join('')}</div>` : '';
       el.innerHTML = `${p.ok ? `<div class="now-decision m-${p.decision} plan-now">
           <div class="now-kicker">Empfehlung jetzt</div>
           <div class="now-title"><span class="avatar big ${m[2]}">${ic(m[1])}</span>${esc(p.label)}</div>
           <p class="muted">${esc(p.text)}</p>
           ${strip}
-          <div class="row wrap" style="gap:8px"><span class="badge ${p.buy_now ? 'accent' : ''}">${p.buy_now ? 'Strom kaufen: ja' : 'Strom kaufen: nein'}</span><button class="btn sm" id="whyBtn">${ic('info')}Warum dieser Plan?</button></div></div>`
+          <div class="row wrap" style="gap:8px"><button class="btn sm" id="whyBtn">${ic('info')}Warum dieser Plan?</button></div></div>`
         : `<div class="notice">${ic('alert')}<div>${esc(p.reason)}</div></div>`}
         <div class="grid kpis">
           ${kpi('battery', 'ok', 'Akku jetzt', `${cnt('psoc', nf(p.soc, 0))}<small>%</small>`, `${nf(rt.usable_kwh, 1)} kWh nutzbar bis zur Reserve von ${nf(p.battery.min_soc, 0)} %`)}

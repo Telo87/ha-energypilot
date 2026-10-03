@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.4
+
+- Empfehlung jetzt (Übersicht und Planung): Der Hinweis „Strom kaufen: ja/nein“ entfällt – er wiederholte nur die Empfehlung („Aus dem Netz laden“ heißt kaufen, alles andere nicht). Der Sensor `binary_sensor.energypilot_netzladen` für Automationen bleibt
+- Zeigt der Streifen der nächsten Stunden nur eine Empfehlung, steht darunter „unverändert in den nächsten Stunden“ statt einer Legende mit einem einzigen Eintrag
+
 ## 0.11.3
 
 Lesbarkeit auf dem Handy, alle Seiten durchgesehen:

@@ -933,3 +933,8 @@ details.fold > summary { display: none; }
   details.fold > :not(summary) { margin: 0 !important; padding: 10px 12px !important; background: none; border: 0; border-radius: 0; font-size: 13px; line-height: 1.5; }
   details.fold > .notice > svg { display: none; }
 }
+
+/* one mode for all twelve hours: say so instead of repeating the title as a key */
+.mode-key.single { margin: 6px 0 12px; }
+.mode-key.single > span { display: none; }
+.mode-key.single::after { content: "unverändert in den nächsten Stunden"; color: var(--text-3); }
