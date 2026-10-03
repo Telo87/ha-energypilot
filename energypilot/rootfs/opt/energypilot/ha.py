@@ -139,6 +139,17 @@ class HomeAssistant:
             raise HAError(f"Home-Assistant-WebSocket nicht erreichbar: {err}") from err
         return results
 
+    async def host_ip(self) -> str | None:
+        """IPv4 address of Home Assistant in the home network - the name "homeassistant.local" does not
+        resolve on every device (VPN, some phones), the address always works."""
+        try:
+            (res,) = await self.ws({"type": "network"})
+            adapters = [a for a in (res or {}).get("adapters", []) if a.get("enabled") and a.get("ipv4")]
+            adapters.sort(key=lambda a: not a.get("default"))
+            return adapters[0]["ipv4"][0]["address"] if adapters else None
+        except (HAError, KeyError, IndexError, TypeError, ValueError):
+            return None
+
     async def statistics_metadata(self, ids: list[str]) -> dict[str, dict]:
         (res,) = await self.ws({"type": "recorder/get_statistics_metadata", "statistic_ids": ids})
         return {m["statistic_id"]: m for m in res or []}

@@ -264,8 +264,9 @@ unter Einstellungen › Handy-App):
 2. Auf derselben Seite unter **Netzwerk** in das leere Feld neben „8099/tcp“ eine freie Portnummer eintragen
    (z. B. 8199) und speichern; das Add-on startet neu. Meldet Home Assistant „port … is already in use“, ist die
    Nummer belegt und das Add-on startet nicht – dann eine andere Zahl eintragen und das Add-on wieder starten.
-3. Auf dem Handy im Browser `http://<Adresse von Home Assistant>:<Port>` öffnen, z. B.
-   `http://homeassistant.local:8199`, und mit dem Passwort anmelden.
+3. Auf dem Handy im Browser `http://<IP-Adresse von Home Assistant>:<Port>` öffnen, z. B.
+   `http://192.168.1.20:8199`, und mit dem Passwort anmelden. Die fertige Adresse steht unter Einstellungen ›
+   Handy-App. Der Name `homeassistant.local` wird nicht auf jedem Handy und nicht über VPN gefunden.
 4. **iPhone (Safari):** Teilen-Symbol › „Zum Home-Bildschirm“. **Android (Chrome):** Menü › „Zum Startbildschirm
    hinzufügen“ bzw. „App installieren“.
 

@@ -261,6 +261,7 @@ async def direct_info(request: web.Request) -> web.Response:
     return _ok({
         "password": bool(options.direct_password),
         "port": await _hub(request).ha.direct_port(),
+        "ip": await _hub(request).ha.host_ip(),
         "direct": request.remote != INGRESS_PROXY and not options.allow_all,  # this page was opened directly
     })
 

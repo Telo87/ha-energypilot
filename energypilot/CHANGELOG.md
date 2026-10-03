@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.2
+
+- Handy-App: Die Anleitung nennt die Adresse jetzt mit der IP-Adresse von Home Assistant statt mit dem Namen – „homeassistant.local“ wird nicht auf jedem Handy und nicht über VPN gefunden
+
 ## 0.11.1
 
 - Einstellungen: neuer Reiter **„Handy-App“** mit der Anleitung für den Direktzugriff Schritt für Schritt. Er zeigt, welche Schritte schon erledigt sind (Passwort gesetzt, Port freigegeben), und nennt die fertige Adresse zum Öffnen auf dem Handy

@@ -1839,10 +1839,13 @@
   // Direct access: EnergyPilot on its own port, added to the phone's home screen like an app
   async function renderApp(el) {
     setHeader('Einstellungen', 'EnergyPilot als App auf dem Handy');
-    let d = { password: false, port: null, direct: false };
+    let d = { password: false, port: null, ip: null, direct: false };
     try { d = await api('direct'); } catch { /* older server */ }
-    const host = location.hostname;
-    const url = `http://${host}:${d.port || 8199}`;
+    // the address always works; a name like "homeassistant.local" is not resolved on every phone or over VPN
+    const isIp = /^[\d.]+$/.test(location.hostname);
+    const port = d.port || 8199;
+    const url = `http://${d.ip || location.hostname}:${port}`;
+    const byName = d.ip && !isIp && location.hostname !== d.ip ? `http://${location.hostname}:${port}` : '';
     const done = (ok) => `<span class="badge ${ok ? 'ok' : ''}">${ok ? `${ic('check')}erledigt` : 'offen'}</span>`;
     const ready = d.password && d.port;
     el.innerHTML = `<div class="card"><div class="card-head"><div class="avatar accent">${ic('phone')}</div><h2>Als App auf dem Handy<div class="faint" style="font-weight:400;font-size:12.5px">Im Vollbild, mit eigenem Symbol, ohne das Menü von Home Assistant</div></h2>${d.direct ? '<span class="badge ok">Du nutzt gerade den Direktzugriff</span>' : ''}</div>
@@ -1851,7 +1854,7 @@
         <ol class="guide">
           <li><b>Passwort setzen</b> ${done(d.password)}<br>In Home Assistant: Einstellungen › Add-ons › EnergyPilot › <b>Konfiguration</b>. Bei „Passwort für den Direktzugriff“ ein Passwort eintragen und <b>Speichern</b>.</li>
           <li><b>Port freigeben</b> ${done(!!d.port)}<br>Auf derselben Seite weiter unten unter <b>Netzwerk</b>: In das leere Feld links neben „8099/tcp“ eine freie Portnummer eintragen, z. B. <span class="mono">8199</span>, und <b>Speichern</b>. Das Add-on startet neu. <span class="faint">(Das „8099/tcp“ rechts ist nur die Bezeichnung; die Zahl links ist der Port in deinem Netz. Meldet Home Assistant „port … is already in use“, ist die Nummer belegt und das Add-on startet nicht – dann eine andere Zahl eintragen, z. B. 8765, und das Add-on wieder starten.)</span></li>
-          <li><b>Auf dem Handy im Browser öffnen</b><br><a href="${ready ? url : '#/settings?tab=app'}" ${ready ? 'target="_blank" rel="noopener"' : ''} class="mono">${esc(url)}</a> – mit dem Passwort anmelden. <span class="faint">Über VPN ggf. statt des Namens die IP-Adresse von Home Assistant verwenden.</span></li>
+          <li><b>Auf dem Handy im Browser öffnen</b><br><a href="${ready ? url : '#/settings?tab=app'}" ${ready ? 'target="_blank" rel="noopener"' : ''} class="mono">${esc(url)}</a> – mit dem Passwort anmelden. <span class="faint">${d.ip ? `Die Adresse mit Zahlen funktioniert auf jedem Gerät, auch über VPN.${byName ? ` Mit dem Namen (<span class="mono">${esc(byName)}</span>) klappt es nicht auf jedem Handy.` : ''}` : 'Kommt keine Verbindung zustande, statt des Namens die IP-Adresse von Home Assistant verwenden (Home Assistant › Einstellungen › System › Netzwerk).'} Die Adresse vollständig mit <span class="mono">http://</span> eintippen.</span></li>
           <li><b>Zum Home-Bildschirm hinzufügen</b><br><b>iPhone</b> (Safari): unten auf das Teilen-Symbol tippen (Quadrat mit Pfeil nach oben) › „Zum Home-Bildschirm“ › „Hinzufügen“.<br><b>Android</b> (Chrome): Menü ⋮ › „Zum Startbildschirm hinzufügen“ bzw. „App installieren“.</li>
           <li><b>App starten</b><br>Über das neue Symbol öffnen. Die App fragt das Passwort beim ersten Start noch einmal ab und merkt es sich dann.</li>
         </ol>
