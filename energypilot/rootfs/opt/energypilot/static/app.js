@@ -18,6 +18,10 @@
     fn();
     if (el.scrollTop !== top) el.scrollTop = top;
   }
+  // Long explanations: on a phone folded away behind their title (closed by default), on a desktop shown as before
+  const isPhone = () => window.matchMedia('(max-width: 700px)').matches;
+  const fold = (label, cls = '') => `<details class="fold ${cls}"${isPhone() ? '' : ' open'}><summary>${ic('info')}<span>${label}</span>${ic('chevronDown', 'chev')}</summary>`;
+  const FOLD_END = '</details>';
   const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // DOM morphing: periodic refreshes only touch what actually changed, so hover
@@ -40,8 +44,9 @@
     // while the page fades in, keep the stagger delay (style="--i") – removing it
     // would restart the running animation and make the element jump
     const keepI = a.style && a.closest('.page-in') ? a.style.getPropertyValue('--i') : '';
-    Array.from(a.attributes).forEach((at) => { if (!b.hasAttribute(at.name) && !(at.name === 'style' && keepI)) a.removeAttribute(at.name); });
-    Array.from(b.attributes).forEach((at) => { if (a.getAttribute(at.name) !== at.value && !(at.name === 'style' && keepI)) a.setAttribute(at.name, at.value); });
+    const own = (name) => (name === 'style' && keepI) || (name === 'open' && a.tagName === 'DETAILS');  // the user opens and closes these
+    Array.from(a.attributes).forEach((at) => { if (!b.hasAttribute(at.name) && !own(at.name)) a.removeAttribute(at.name); });
+    Array.from(b.attributes).forEach((at) => { if (a.getAttribute(at.name) !== at.value && !own(at.name)) a.setAttribute(at.name, at.value); });
     if (keepI && b.hasAttribute('style')) { a.setAttribute('style', b.getAttribute('style')); a.style.setProperty('--i', keepI); }
     if (a.tagName === 'INPUT') {
       if (a.type === 'checkbox' || a.type === 'radio') a.checked = b.hasAttribute('checked');
@@ -291,10 +296,21 @@
     }
     const every = Math.max(1, Math.ceil(64 / cw));
     const tick = c.tick || ((ts) => fmtHour(ts));
+    // labels never run into each other: on a narrow screen some are left out - day labels
+    // ("So., 04.10.") are placed first, the hours fill the room that is left
+    const cand = [];
     for (let i = 0; i < n; i += 1) {
       if (c.tickAt ? !c.tickAt(c.xs[i], i) : i % every) continue;
-      grid += `<text class="axis" x="${x(i) + (c.tickCenter ? cw / 2 : 0)}" y="${H - 7}" text-anchor="${i === 0 && !c.tickCenter ? 'start' : 'middle'}">${tick(c.xs[i])}</text>`;
+      const label = String(tick(c.xs[i])); const start = i === 0 && !c.tickCenter;
+      const tx = x(i) + (c.tickCenter ? cw / 2 : 0); const w = label.length * 6.2;
+      cand.push({ label, tx, start, left: start ? tx : tx - w / 2, right: start ? tx + w : tx + w / 2, major: label.length > 5 });
     }
+    const placed = [];
+    [true, false].forEach((major) => cand.filter((t) => t.major === major).forEach((t) => {
+      if (t.right > W + 2 || placed.some((q) => t.left < q.right + 8 && t.right > q.left - 8)) return;
+      placed.push(t);
+      grid += `<text class="axis" x="${t.tx}" y="${H - 7}" text-anchor="${t.start ? 'start' : 'middle'}">${t.label}</text>`;
+    }));
     let bars = '';
     if (c.bar) {
       const gap = cw > 8 ? 2 : cw > 3 ? 1 : 0;
@@ -775,12 +791,17 @@
       const loadSum = (from, to) => (p.energy || []).filter((e) => e.ts >= from && e.ts < to).reduce((a, e) => a + e.load, 0);
       const tomorrowTs = dayTs(shiftDay(localDay(), 1)); const afterTs = dayTs(shiftDay(localDay(), 2));
       const kpi = (icon, cls, label, value, foot) => `<div class="card kpi"><div class="kpi-label"><span class="kpi-icon ${cls}">${ic(icon)}</span>${label}</div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`;
-      el.innerHTML = `${p.ok ? `<div class="card decision ${m[2]}"><div class="card-body row" style="gap:16px;align-items:flex-start">
-          <div class="avatar ${m[2]}" style="width:48px;height:48px">${ic(m[1])}</div>
-          <div class="grow"><div class="faint" style="font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Empfehlung jetzt</div>
-            <div style="font-size:20px;font-weight:700;margin:2px 0 4px">${esc(p.label)}</div>
-            <div class="muted">${esc(p.text)}</div></div>
-          <div class="col" style="gap:8px;align-items:flex-end;align-self:center"><span class="badge ${p.buy_now ? 'accent' : ''}">${p.buy_now ? 'Strom kaufen: ja' : 'Strom kaufen: nein'}</span><button class="btn sm" id="whyBtn">${ic('info')}Warum dieser Plan?</button></div></div></div>`
+      // same block as on the overview: title, text below it, the next hours as a strip, actions last
+      const nextSteps = p.ok ? p.steps.slice(0, 12) : [];
+      const strip = nextSteps.length > 2 ? `<div class="mode-line" role="img" aria-label="Empfehlung der nächsten Stunden">${nextSteps.map((st) => `<i class="m-${st.mode}" title="${fmtHour(st.ts)} Uhr: ${MODE[st.mode][0]}"></i>`).join('')}</div>
+          <div class="mode-ticks">${nextSteps.map((st, i) => `<span>${i % 3 === 0 ? fmtHour(st.ts) : ''}</span>`).join('')}</div>
+          <div class="mode-key">${Object.keys(MODE).filter((k) => nextSteps.some((st) => st.mode === k)).map((k) => `<span><i class="m-${k}"></i>${MODE[k][0]}</span>`).join('')}</div>` : '';
+      el.innerHTML = `${p.ok ? `<div class="now-decision m-${p.decision} plan-now">
+          <div class="now-kicker">Empfehlung jetzt</div>
+          <div class="now-title"><span class="avatar big ${m[2]}">${ic(m[1])}</span>${esc(p.label)}</div>
+          <p class="muted">${esc(p.text)}</p>
+          ${strip}
+          <div class="row wrap" style="gap:8px"><span class="badge ${p.buy_now ? 'accent' : ''}">${p.buy_now ? 'Strom kaufen: ja' : 'Strom kaufen: nein'}</span><button class="btn sm" id="whyBtn">${ic('info')}Warum dieser Plan?</button></div></div>`
         : `<div class="notice">${ic('alert')}<div>${esc(p.reason)}</div></div>`}
         <div class="grid kpis">
           ${kpi('battery', 'ok', 'Akku jetzt', `${cnt('psoc', nf(p.soc, 0))}<small>%</small>`, `${nf(rt.usable_kwh, 1)} kWh nutzbar bis zur Reserve von ${nf(p.battery.min_soc, 0)} %`)}
@@ -855,7 +876,7 @@
           ? kpi('home', '', 'Stromkosten gemessen', `${cnt('jc', nf(t.cost_real, 2))}<small>€</small>`, `aus Netzbezug und Einspeisung der ausgewerteten Stunden · nachgerechnet ohne EnergyPilot ${eur(t.cost_base)}`)
           : kpi('home', '', 'Stromkosten ohne EnergyPilot', `${cnt('jc', nf(t.cost_base, 2))}<small>€</small>`, 'nachgerechnet; negativ = Einspeisung bringt mehr, als der Bezug kostet')}
       </div>
-      <div class="notice info" style="margin-top:16px">${ic('info')}<div>Für jeden Tag rechnet EnergyPilot drei Stromrechnungen aus den <b>echten</b> Messwerten und Preisen: <b>ohne EnergyPilot</b> (Akku im Eigenverbrauch, wie er tatsächlich lief), <b>mit EnergyPilot</b> (die Empfehlungen, die zur jeweiligen Stunde aus den Prognosen entstanden, wären befolgt worden) und <b>optimal</b> (im Nachhinein bestmöglich). Liegt „mit EnergyPilot“ dauerhaft nahe an „optimal“, sind Prognosen und Planung verlässlich genug für die Steuerung. Die Ersparnis berücksichtigt auch, wie viel Energie am Ende noch im Akku steckt. ${d.load_kind === 'house' ? `Gerechnet wird mit dem gesamten gemessenen Hausverbrauch – inklusive E-Auto, das auch aus dem Akku geladen wird${d.heater_surplus ? '. Der Heizstab läuft nur mit PV-Überschuss: Er nimmt in der Nachrechnung nur auf, was sonst eingespeist würde' : ' und Heizstab'}. Zur Kontrolle steht daneben die <b>gemessene</b> Rechnung aus Netzbezug und Einspeisung.` : 'Grundlage ist der Grundverbrauch – für E-Auto und Heizstab fehlt der Hausverbrauch-Sensor.'} Ein Klick auf einen Tag zeigt die Aufteilung.</div></div>
+      ${fold('So wird gerechnet', 'gap')}<div class="notice info" style="margin-top:16px">${ic('info')}<div>Für jeden Tag rechnet EnergyPilot drei Stromrechnungen aus den <b>echten</b> Messwerten und Preisen: <b>ohne EnergyPilot</b> (Akku im Eigenverbrauch, wie er tatsächlich lief), <b>mit EnergyPilot</b> (die Empfehlungen, die zur jeweiligen Stunde aus den Prognosen entstanden, wären befolgt worden) und <b>optimal</b> (im Nachhinein bestmöglich). Liegt „mit EnergyPilot“ dauerhaft nahe an „optimal“, sind Prognosen und Planung verlässlich genug für die Steuerung. Die Ersparnis berücksichtigt auch, wie viel Energie am Ende noch im Akku steckt. ${d.load_kind === 'house' ? `Gerechnet wird mit dem gesamten gemessenen Hausverbrauch – inklusive E-Auto, das auch aus dem Akku geladen wird${d.heater_surplus ? '. Der Heizstab läuft nur mit PV-Überschuss: Er nimmt in der Nachrechnung nur auf, was sonst eingespeist würde' : ' und Heizstab'}. Zur Kontrolle steht daneben die <b>gemessene</b> Rechnung aus Netzbezug und Einspeisung.` : 'Grundlage ist der Grundverbrauch – für E-Auto und Heizstab fehlt der Hausverbrauch-Sensor.'} Ein Klick auf einen Tag zeigt die Aufteilung.</div></div>${FOLD_END}
       <div class="card" style="margin-top:16px"><div class="card-head"><h2>Ersparnis pro Tag</h2></div><div class="card-body">
         <div class="legend"><span class="static"><i class="box" style="background:var(--ok)"></i>Mit EnergyPilot gespart</span><span class="static"><i style="background:var(--text-2)"></i>Im Nachhinein möglich</span></div>
         <div class="chart" id="jChart"></div></div></div>
@@ -896,14 +917,14 @@
           ${billRow('best', 'Optimal', 'im Nachhinein bestmöglich')}
         </tbody></table></div>
         ${x.segments > 1 ? `<div class="notice info" style="margin:-6px 0 12px">${ic('info')}<div>Die ausgewerteten Stunden bestehen aus ${x.segments} Abschnitten – dazwischen fehlen Empfehlungen, z. B. weil das Add-on neu gestartet wurde. Jeder Abschnitt beginnt mit dem gemessenen Ladezustand des Akkus.</div></div>` : ''}
-        <p class="faint" style="font-size:12.5px;margin:-6px 0 16px">Summe = Bezug − Vergütung (Einspeisevergütung ${ctkwh(d.feed_in_ct, 2)}); negativ = die Einspeisung bringt mehr, als der Bezug kostet.${d.heater_surplus && x.heater ? ` Der Heizstab läuft nur mit Überschuss und nimmt in der Nachrechnung auf, was sonst eingespeist würde (ohne EnergyPilot ${kwh(bl.base && bl.base.heater_kwh, 1)}, gemessen ${kwh(x.heater, 1)}).` : ''} ${d.grid_floor_wh >= 5 ? `Dein Speicher bezieht auch bei geladenem Akku im Mittel etwa ${nf(d.grid_floor_wh, 0)} Wh pro Stunde aus dem Netz (Regelung, Eigenverbrauch) – das ist in der Nachrechnung berücksichtigt. ` : ''}Weicht „ohne EnergyPilot“ stark von „gemessen“ ab, rechnet die Simulation den Akku anders, als er sich tatsächlich verhält. „Gespart“ und „möglich“ rechnen zusätzlich die Energie, die am Ende noch im Akku steckt.</p>` : ''}
+        ${fold('Erklärung zur Rechnung')}<p class="faint" style="font-size:12.5px;margin:-6px 0 16px">Summe = Bezug − Vergütung (Einspeisevergütung ${ctkwh(d.feed_in_ct, 2)}); negativ = die Einspeisung bringt mehr, als der Bezug kostet.${d.heater_surplus && x.heater ? ` Der Heizstab läuft nur mit Überschuss und nimmt in der Nachrechnung auf, was sonst eingespeist würde (ohne EnergyPilot ${kwh(bl.base && bl.base.heater_kwh, 1)}, gemessen ${kwh(x.heater, 1)}).` : ''} ${d.grid_floor_wh >= 5 ? `Dein Speicher bezieht auch bei geladenem Akku im Mittel etwa ${nf(d.grid_floor_wh, 0)} Wh pro Stunde aus dem Netz (Regelung, Eigenverbrauch) – das ist in der Nachrechnung berücksichtigt. ` : ''}Weicht „ohne EnergyPilot“ stark von „gemessen“ ab, rechnet die Simulation den Akku anders, als er sich tatsächlich verhält. „Gespart“ und „möglich“ rechnen zusätzlich die Energie, die am Ende noch im Akku steckt.</p>${FOLD_END}` : ''}
         <div class="table-wrap"><table class="table compact"><thead><tr><th>Stunde</th><th>Empfehlung</th><th class="num">ct/kWh</th><th class="num">PV kWh<br><span class="faint">Prognose (Abw.)</span></th><th class="num">Grundverbr. kWh<br><span class="faint">Prognose (Abw.)</span></th><th class="num">Verbrauch<br><span class="faint">gesamt kWh</span></th><th class="num">Netz kWh<br><span class="faint">gemessen</span></th><th class="num">Akku % am Stundenende<br><span class="faint">geplant / Ist</span></th></tr></thead><tbody>
         ${x.detail.map((h) => `<tr${h.complete ? '' : ' class="offline"'}><td class="nowrap">${fmtHour(h.ts)}–${fmtHour(h.ts + 3600)}</td><td><span class="badge ${MODE[h.mode][2]}">${ic(MODE[h.mode][1])}${MODE[h.mode][0]}</span></td>
           <td class="num">${nf(h.price, 1)}</td><td class="num">${nf(h.pv_fc, 2)}${diff(h.pv_fc, h.pv)}</td><td class="num">${nf(h.load_fc, 2)}${diff(h.load_fc, h.load)}</td>
           <td class="num">${h.house == null ? '–' : nf(h.house, 2)}</td><td class="num" title="↓ Bezug, ↑ Einspeisung">${grid(h)}</td>
           <td class="num">${nf(h.soc_plan, 0)} / ${h.soc_actual == null ? '–' : nf(h.soc_actual, 0)}</td></tr>`).join('')}
         </tbody></table></div>
-        <p class="faint" style="font-size:12.5px;margin:10px 0 0">Abw. = Prognose minus Messwert (+ = zu hoch vorhergesagt). Die Verbrauchsprognose gilt für den Grundverbrauch ohne E-Auto und Heizstab. Netz: ↓ Bezug, ↑ Einspeisung. Akku: geplanter und gemessener Ladezustand am Ende der Stunde. Solange EnergyPilot nicht steuert, läuft der Akku im Eigenverbrauch – bei „laden“ und „halten“ zeigt der geplante Wert, wohin der Plan ihn gebracht hätte.</p>`,
+        ${fold('Erklärung der Spalten')}<p class="faint" style="font-size:12.5px;margin:10px 0 0">Abw. = Prognose minus Messwert (+ = zu hoch vorhergesagt). Die Verbrauchsprognose gilt für den Grundverbrauch ohne E-Auto und Heizstab. Netz: ↓ Bezug, ↑ Einspeisung. Akku: geplanter und gemessener Ladezustand am Ende der Stunde. Solange EnergyPilot nicht steuert, läuft der Akku im Eigenverbrauch – bei „laden“ und „halten“ zeigt der geplante Wert, wohin der Plan ihn gebracht hätte.</p>${FOLD_END}`,
     });
   }
 
@@ -917,7 +938,7 @@
       return notable.map(([h, v]) => `<span class="badge ${v < 1 ? 'warn' : 'accent'}" title="${h}:00–${Number(h) + 1}:00 Uhr">${h} Uhr ${signed((v - 1) * 100, 0)} %</span>`).join(' ');
     };
     return `<div class="card"><div class="card-head"><h2>So rechnet die eigene Prognose <span class="sub">gelernt aus den letzten ${model[arrays[0].id].days} Tagen</span></h2></div>
-      <div class="card-body"><p class="explain">EnergyPilot gewichtet jede Quelle danach, wie gut sie bei dieser Anlage zuletzt lag (je nach erwarteter Wetterlage), und korrigiert das Ergebnis je Uhrzeit – <b>getrennt für Sonne und Wolken</b>: Schatten von Bäumen oder Nachbarhäusern wirkt nur bei direkter Sonne, systematische Fehler der Wettermodelle zeigen sich auch bei Bewölkung. Neu gelernt wird jede Stunde.</p>
+      <div class="card-body">${fold('So lernt EnergyPilot')}<p class="explain">EnergyPilot gewichtet jede Quelle danach, wie gut sie bei dieser Anlage zuletzt lag (je nach erwarteter Wetterlage), und korrigiert das Ergebnis je Uhrzeit – <b>getrennt für Sonne und Wolken</b>: Schatten von Bäumen oder Nachbarhäusern wirkt nur bei direkter Sonne, systematische Fehler der Wettermodelle zeigen sich auch bei Bewölkung. Neu gelernt wird jede Stunde.</p>${FOLD_END}
       <div class="grid cols-2">${arrays.map((a) => {
         const m = model[a.id];
         const w = Object.entries(m.weights).sort((x, y) => y[1] - x[1]);
@@ -969,7 +990,7 @@
         <div class="card-body">${bench ? `<p class="explain">Vorsprung der eigenen Prognose vor ${esc(tr.labels[bench])}: ${early == null ? '–' : `<b>${signed(early, 1)} Prozentpunkte</b> in den ersten ${n} Wochen`} → ${late == null ? '–' : `<b>${signed(late, 1)} Prozentpunkte</b> in den letzten ${n} Wochen`}. EnergyPilot selbst: ${pct(epEarly, 0)} → ${pct(epLate, 0)}.</p>` : ''}
           <div class="legend">${tr.sources.map((s) => `<span class="static"><i style="background:${srcColor(s)}"></i>${esc(tr.labels[s])}</span>`).join('')}</div>
           <div class="chart" id="trendChart"></div>
-          <p class="faint" style="font-size:12.5px;margin:10px 0 0">Wie gut eine Woche vorhergesagt werden kann, hängt stark vom Wetter${isLoad ? ' und vom Alltag' : ''} ab – deshalb der Vergleich auf denselben Stunden mit ${bench ? esc(tr.labels[bench]) : 'einem Maßstab'}. Wächst der Vorsprung, lernt EnergyPilot dazu; schrumpft er, wird die eigene Prognose schlechter. Vergangene Wochen sind mit dem heutigen Verfahren nachgerechnet – jeweils nur mit den Daten, die damals schon vorlagen.</p></div></div>`;
+          ${fold('So ist der Vergleich zu lesen')}<p class="faint" style="font-size:12.5px;margin:10px 0 0">Wie gut eine Woche vorhergesagt werden kann, hängt stark vom Wetter${isLoad ? ' und vom Alltag' : ''} ab – deshalb der Vergleich auf denselben Stunden mit ${bench ? esc(tr.labels[bench]) : 'einem Maßstab'}. Wächst der Vorsprung, lernt EnergyPilot dazu; schrumpft er, wird die eigene Prognose schlechter. Vergangene Wochen sind mit dem heutigen Verfahren nachgerechnet – jeweils nur mit den Daten, die damals schon vorlagen.</p>${FOLD_END}</div></div>`;
     };
     const toolbar = () => `${seriesSelect('accSeries', cfg.series, arrays)}<div class="toolbar">
         <span class="tb-label">Zeitraum</span><div class="seg" id="accDays">${[[7, '7 Tage'], [14, '14 Tage'], [30, '30 Tage'], [90, '90 Tage'], [365, '1 Jahr']].map(([d, l]) => `<button data-v="${d}" class="${cfg.days === d ? 'active' : ''}">${l}</button>`).join('')}</div>
@@ -1015,7 +1036,7 @@
       el.innerHTML = `${toolbar()}
         <div class="card"><div class="card-head"><h2>Rangliste</h2></div>
           <div class="card-body flush"><p class="explain" style="padding:0 18px">${ic('trophy')} Am genauesten: <b>${esc(res[0].label)}</b> – Genauigkeit ${pct(res[0].score, 1)}, beim ${what} im Mittel ${pct(res[0].day_nmae_pct)} daneben.
-            <span class="faint">Sortiert nach Genauigkeit = 100 % minus mittlerer Fehler je Stunde relativ zum Messwert – für die Planung zählt jede Stunde. Tagesabweichung = Fehler beim ${what}; dort kann eine andere Quelle vorn liegen, weil sich Fehler über den Tag ausgleichen. Tendenz = systematische Über- (+) oder Unterschätzung.${isLoad ? ' Grundverbrauch = Hausverbrauch ohne E-Auto und Heizstab; „Wie vor einer Woche“ ist der Vergleichsmaßstab.' : ''}</span></p>
+            </p>${fold('Erklärung der Spalten', 'pad')}<p class="explain faint" style="padding:0 18px">Sortiert nach Genauigkeit = 100 % minus mittlerer Fehler je Stunde relativ zum Messwert – für die Planung zählt jede Stunde. Tagesabweichung = Fehler beim ${what}; dort kann eine andere Quelle vorn liegen, weil sich Fehler über den Tag ausgleichen. Tendenz = systematische Über- (+) oder Unterschätzung.${isLoad ? ' Grundverbrauch = Hausverbrauch ohne E-Auto und Heizstab; „Wie vor einer Woche“ ist der Vergleichsmaßstab.' : ''}</p>${FOLD_END}
           <div class="table-wrap"><table class="table stack ranked"><thead><tr><th></th><th>Quelle</th><th>Genauigkeit</th><th class="num">Tagesabw. Ø</th><th class="num">Tendenz</th><th class="num">Größter Tagesfehler</th><th class="num hide-md">Stundenfehler Ø</th><th class="num hide-md">RMSE</th><th class="num">Tage</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
         ${trendCard(isLoad)}
         ${isLoad ? '' : modelCard(d.model)}
@@ -1385,7 +1406,7 @@
             ${a.sensor ? `<button class="btn sm" data-geo="${a.id}" title="Aus den Messwerten prüfen, ob Ausrichtung und Neigung stimmen">${ic('compass')}<span class="hide-sm">Ausrichtung prüfen</span></button>` : ''}
             <button class="icon-btn" title="Bearbeiten">${ic('edit')}</button></div>`).join('')
           || '<div class="muted" style="padding:6px 18px 14px;font-size:13px">Noch keine Anlage. Lege für jeden Messsensor (meist ein Wechselrichter) eine Anlage an. Zeigen Module an einem Wechselrichter in verschiedene Richtungen – z. B. ein String nach Osten, einer nach Westen –, trägst du sie als Teilflächen derselben Anlage ein.</div>'}</div></div></div>
-        <div class="notice info" style="margin-top:16px">${ic('info')}<div><b>Messsensor:</b> Ein Leistungssensor (W/kW, z. B. die AC-Leistung des Wechselrichters) oder ein Energiezähler (Wh/kWh). Er braucht eine Langzeitstatistik (state_class) – dann liest EnergyPilot die Erzeugung der letzten ${S.settings.backfill_days} Tage rückwirkend aus Home Assistant und kann die Prognosen sofort vergleichen.</div></div>`;
+        ${fold('Welcher Sensor passt?', 'gap')}<div class="notice info" style="margin-top:16px">${ic('info')}<div><b>Messsensor:</b> Ein Leistungssensor (W/kW, z. B. die AC-Leistung des Wechselrichters) oder ein Energiezähler (Wh/kWh). Er braucht eine Langzeitstatistik (state_class) – dann liest EnergyPilot die Erzeugung der letzten ${S.settings.backfill_days} Tage rückwirkend aus Home Assistant und kann die Prognosen sofort vergleichen.</div></div>${FOLD_END}`;
       $('#addArr').addEventListener('click', () => arrayForm());
       $$('[data-edit]').forEach((r) => r.addEventListener('click', (e) => { if (!e.target.closest('[data-geo]')) arrayForm(S.settings.arrays.find((a) => a.id === r.dataset.edit)); }));
       $$('[data-geo]').forEach((b) => b.addEventListener('click', () => geometryCheck(S.settings.arrays.find((a) => a.id === b.dataset.geo))));

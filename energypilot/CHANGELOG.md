@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11.3
+
+Lesbarkeit auf dem Handy, alle Seiten durchgesehen:
+
+- Planung: Der Block „Empfehlung jetzt“ war auf schmalen Bildschirmen in eine schmale Textspalte gequetscht. Er ist jetzt wie in der Übersicht aufgebaut – Titel, Text darunter über die ganze Breite, die nächsten zwölf Stunden als Streifen, Knöpfe am Ende
+- Erklärtexte in den Kacheln und Listen werden auf dem Handy nicht mehr mit „…“ abgeschnitten, sondern ganz angezeigt
+- Diagramme: Achsenbeschriftungen überlappen nicht mehr; ist zu wenig Platz, bleiben die Tagesangaben stehen und einzelne Uhrzeiten entfallen
+- Kartentitel: Der Untertitel steht unter dem Titel statt daneben, Knöpfe und Hinweise rutschen bei Platzmangel in die nächste Zeile
+- Reiter (Einstellungen, Zeitraum, „Auswertung für“) bleiben in einer Zeile und lassen sich seitlich wischen, statt sich über vier Zeilen zu stapeln
+- Breite Tabellen (Stundenplan, Kosten, Protokoll): Die erste Spalte bleibt beim seitlichen Wischen stehen
+- Lange Erklärtexte (Protokoll, Prognose-Check, Tagesansicht im Protokoll, PV-Anlagen) sind auf dem Handy eingeklappt und öffnen sich mit einem Tipp auf ihren Titel; am Desktop stehen sie wie bisher offen da
+- Die Kopfzeile scrollt auf dem Handy mit weg und gibt den Platz frei; die Leiste „Speichern“ liegt nicht mehr hinter der unteren Navigationsleiste
+
 ## 0.11.2
 
 - Handy-App: Die Anleitung nennt die Adresse jetzt mit der IP-Adresse von Home Assistant statt mit dem Namen – „homeassistant.local“ wird nicht auf jedem Handy und nicht über VPN gefunden
