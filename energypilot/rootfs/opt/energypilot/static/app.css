@@ -938,3 +938,14 @@ details.fold > summary { display: none; }
 .mode-key.single { margin: 6px 0 12px; }
 .mode-key.single > span { display: none; }
 .mode-key.single::after { content: "unverändert in den nächsten Stunden"; color: var(--text-3); }
+
+/* plan page: the plan as blocks of the same recommendation */
+.card.schedule { margin-bottom: 16px; }
+.list-item.sched { --mc: var(--ok); align-items: stretch; gap: 12px; }
+.list-item.sched.m-hold { --mc: var(--warn); }
+.list-item.sched.m-charge { --mc: var(--accent); }
+.sched-bar { flex: none; width: 4px; border-radius: 2px; background: var(--mc); }
+.list-item.sched .title { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; white-space: normal; }
+.list-item.sched .title svg { width: 16px; height: 16px; color: var(--mc); }
+.sched-time { font-weight: 500; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.list-item.sched .meta { white-space: normal; margin-top: 2px; }

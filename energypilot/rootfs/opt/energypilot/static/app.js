@@ -228,10 +228,10 @@
     if (!ts) return '–';
     let d = new Date(ts * 1000);
     const midnight = isEnd && d.getHours() === 0 && d.getMinutes() === 0;
-    if (midnight) d = new Date((ts - 60) * 1000);  // 00:00 is shown as 24:00 of the day before
+    if (midnight) d = new Date((ts - 60) * 1000);  // the end of a day is "Mitternacht" of that day, not 00:00 of the next
     const day = localDay(d); const today = localDay();
     const pre = day === today ? 'heute' : day === shiftDay(today, 1) ? 'morgen' : d.toLocaleDateString('de-DE', { weekday: 'short' });
-    return `${pre} ${midnight ? '24:00' : fmtTime(d)}`;
+    return `${pre} ${midnight ? 'Mitternacht' : fmtTime(d)}`;
   }
   const MODE = { normal: ['Eigenverbrauch', 'home', 'ok'], hold: ['Akku halten', 'battery', 'warn'], charge: ['Aus dem Netz laden', 'plug', 'accent'] };
   const kwh = (v, d = 1) => (v == null ? '–' : `${nf(v, d)} kWh`);
@@ -711,7 +711,7 @@
   // "Warum dieser Plan?" - built from the plan itself (see explain.py)
   // "heute 14:00–16:00", over midnight "heute 22:00 – morgen 06:00"
   const span = (a, e) => (localDay(new Date(a * 1000)) === localDay(new Date((e - 1) * 1000))
-    ? `${fmtWhen(a)}–${new Date(e * 1000).getHours() === 0 ? '24:00' : fmtHour(e)}` : `${fmtWhen(a)} – ${fmtWhen(e, true)}`);
+    ? `${fmtWhen(a)} bis ${new Date(e * 1000).getHours() === 0 ? 'Mitternacht' : fmtHour(e)}` : `${fmtWhen(a)} bis ${fmtWhen(e, true)}`);
   function whyItem(i, b) {
     const use = i.use_start ? `für <b>${span(i.use_start, i.use_end)}</b> aufgehoben, wenn Netzstrom Ø ${ctkwh(i.price_use)} kostet (bis ${ctkwh(i.price_use_max)})` : null;
     if (i.mode === 'charge') {
@@ -791,17 +791,33 @@
       const loadSum = (from, to) => (p.energy || []).filter((e) => e.ts >= from && e.ts < to).reduce((a, e) => a + e.load, 0);
       const tomorrowTs = dayTs(shiftDay(localDay(), 1)); const afterTs = dayTs(shiftDay(localDay(), 2));
       const kpi = (icon, cls, label, value, foot) => `<div class="card kpi"><div class="kpi-label"><span class="kpi-icon ${cls}">${ic(icon)}</span>${label}</div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`;
-      // same block as on the overview: title, text below it, the next hours as a strip, actions last
-      const nextSteps = p.ok ? p.steps.slice(0, 12) : [];
-      const strip = nextSteps.length > 2 ? `<div class="mode-line" role="img" aria-label="Empfehlung der nächsten Stunden">${nextSteps.map((st) => `<i class="m-${st.mode}" title="${fmtHour(st.ts)} Uhr: ${MODE[st.mode][0]}"></i>`).join('')}</div>
-          <div class="mode-ticks">${nextSteps.map((st, i) => `<span>${i % 3 === 0 ? fmtHour(st.ts) : ''}</span>`).join('')}</div>
-          <div class="mode-key${new Set(nextSteps.map((st) => st.mode)).size < 2 ? ' single' : ''}">${Object.keys(MODE).filter((k) => nextSteps.some((st) => st.mode === k)).map((k) => `<span><i class="m-${k}"></i>${MODE[k][0]}</span>`).join('')}</div>` : '';
-      el.innerHTML = `${p.ok ? `<div class="now-decision m-${p.decision} plan-now">
-          <div class="now-kicker">Empfehlung jetzt</div>
-          <div class="now-title"><span class="avatar big ${m[2]}">${ic(m[1])}</span>${esc(p.label)}</div>
-          <p class="muted">${esc(p.text)}</p>
-          ${strip}
-          <div class="row wrap" style="gap:8px"><button class="btn sm" id="whyBtn">${ic('info')}Warum dieser Plan?</button></div></div>`
+      // "Fahrplan": the whole plan as blocks of the same recommendation - what comes when, and what the
+      // battery does meanwhile. (The recommendation for right now is on the overview.)
+      const blocks = [];
+      (p.ok ? p.steps : []).forEach((st) => {
+        const last = blocks[blocks.length - 1];
+        if (last && last.mode === st.mode) { last.end = st.ts + 3600; last.soc1 = st.soc_end; last.imp += st.import; last.exp += st.export; last.cost += st.price * st.import; last.path.push([st.ts + 3600, st.soc_end]); } else blocks.push({ mode: st.mode, start: st.ts, end: st.ts + 3600, soc0: st.soc_start, soc1: st.soc_end, imp: st.import, exp: st.export, cost: st.price * st.import, path: [[st.ts + 3600, st.soc_end]] });
+      });
+      const blockText = (b) => {
+        // in words what the battery does: it may fill up at noon and empty again in the evening within one block
+        const hi = b.path.reduce((x, y) => (y[1] > x[1] ? y : x)); const lo = b.path.reduce((x, y) => (y[1] < x[1] ? y : x));
+        const pc = (v) => `${nf(v, 0)} %`;
+        // first hours without a change ("stays at 100 % until about 18:00, then …")
+        const moved = b.path.findIndex((x) => Math.abs(x[1] - b.soc0) > 1.5);
+        const flat = moved >= 2 ? `bleibt bis gegen ${fmtHour(b.path[moved - 1][0])} Uhr bei ${pc(b.soc0)} und ` : '';
+        const dann = flat ? 'dann ' : '';
+        const from = flat ? '' : `von ${pc(b.soc0)} `;
+        const soc = hi[1] - Math.max(b.soc0, b.soc1) > 3 ? `Der Akku ${flat}lädt ${dann}${from}auf ${pc(hi[1])} (gegen ${fmtHour(hi[0])} Uhr) und entlädt danach auf ${pc(b.soc1)}`
+          : Math.min(b.soc0, b.soc1) - lo[1] > 3 ? `Der Akku ${flat}entlädt ${dann}${from}auf ${pc(lo[1])} (gegen ${fmtHour(lo[0])} Uhr) und lädt danach auf ${pc(b.soc1)}`
+            : b.soc1 - b.soc0 > 1.5 ? `Der Akku ${flat}lädt ${dann}${from}auf ${pc(b.soc1)}`
+              : b.soc0 - b.soc1 > 1.5 ? `Der Akku ${flat}entlädt ${dann}${from}auf ${pc(b.soc1)}`
+                : `Der Akku bleibt bei ${pc(b.soc1)}`;
+        const grid = [b.imp >= 0.1 ? `${nf(b.imp, 1)} kWh kommen aus dem Netz (Ø ${nf(b.cost / b.imp, 1)} ct/kWh).` : '', b.exp >= 0.1 ? `${nf(b.exp, 1)} kWh PV-Überschuss gehen ins Netz.` : ''].filter(Boolean).join(' ');
+        return `${soc}.${grid ? ` ${grid}` : ''}`;
+      };
+      const schedule = p.ok ? `<div class="card schedule"><div class="card-head"><h2>Fahrplan <span class="sub">${blocks.length === 1 ? 'keine Änderung im ganzen Zeitraum' : `${blocks.length} Abschnitte`}</span></h2><button class="btn sm" id="whyBtn">${ic('info')}Warum dieser Plan?</button></div>
+          <div class="card-body flush"><div class="list">${blocks.map((b, i) => `<div class="list-item sched m-${b.mode}"><span class="sched-bar"></span><div class="grow"><div class="title">${ic(MODE[b.mode][1])}${MODE[b.mode][0]} <span class="sched-time">${i === 0 ? 'jetzt' : fmtWhen(b.start)} bis ${fmtWhen(b.end, true)}</span></div><div class="meta">${blockText(b)}</div></div></div>`).join('')}</div></div></div>` : '';
+      el.innerHTML = `${p.ok ? schedule
         : `<div class="notice">${ic('alert')}<div>${esc(p.reason)}</div></div>`}
         <div class="grid kpis">
           ${kpi('battery', 'ok', 'Akku jetzt', `${cnt('psoc', nf(p.soc, 0))}<small>%</small>`, `${nf(rt.usable_kwh, 1)} kWh nutzbar bis zur Reserve von ${nf(p.battery.min_soc, 0)} %`)}

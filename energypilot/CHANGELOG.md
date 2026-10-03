@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.5
+
+- Planung: Statt „Empfehlung jetzt“ (steht schon in der Übersicht) zeigt die Seite oben den **Fahrplan** – den ganzen Plan als Abschnitte gleicher Empfehlung: von wann bis wann und in ganzen Sätzen, was der Akku in der Zeit macht (z. B. „Der Akku bleibt bis gegen 18:00 Uhr bei 100 % und entlädt dann auf 52 %. 21,2 kWh PV-Überschuss gehen ins Netz.“). „Warum dieser Plan?“ bleibt dort
+- Zeitangaben: Das Ende eines Tages heißt überall „Mitternacht“ statt „24:00“ (z. B. „bis heute Mitternacht“, „reicht bis morgen Mitternacht“); Zeiträume im Fahrplan und in der Erklärung zum Plan stehen mit „bis“ statt mit Strich
+
 ## 0.11.4
 
 - Empfehlung jetzt (Übersicht und Planung): Der Hinweis „Strom kaufen: ja/nein“ entfällt – er wiederholte nur die Empfehlung („Aus dem Netz laden“ heißt kaufen, alles andere nicht). Der Sensor `binary_sensor.energypilot_netzladen` für Automationen bleibt
