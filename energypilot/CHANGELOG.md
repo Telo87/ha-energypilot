@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.0
+
+Neues Aussehen der Übersicht, Handy-Ansicht und mehr Bewegung:
+
+- **Energiefluss:** Die vier Kacheln für PV, Haus, Akku und Netz sind jetzt ein Bild. Punkte laufen entlang der Linien in Richtung des Stroms – je mehr Leistung, desto schneller. EnergyPilot teilt die Live-Werte dafür auf (PV → Haus, PV → Akku, PV → Netz, Akku → Haus, Netz → Haus, Netz ↔ Akku); ein Mauszeiger auf der Linie nennt die Leistung. Der Ring um den Akku zeigt den Ladezustand und pulsiert beim Laden
+- **Empfehlung jetzt:** Die Karte ist in der Farbe der Empfehlung gehalten (Eigenverbrauch grün, Akku halten gelb, Netzladen blau) und zeigt als Streifen die Empfehlungen der nächsten zwölf Stunden
+- **Diagramm-Legende:** Nicht gewählte Prognosequellen stehen hinter „Quellen vergleichen“ statt in der Legende. Behoben: Der erste Klick auf eine Quelle blendete alle übrigen Quellen ein
+- **Handy:** Leiste am unteren Rand mit Übersicht, Planung, Preise, Verlauf und „Mehr“; größere Tippflächen; die Ranglisten im Prognose-Check erscheinen als Karten statt als breite Tabelle
+- **Animationen:** Balken wachsen beim Öffnen von unten, die Markierung „jetzt“ pulsiert, der Tooltip gleitet mit dem Mauszeiger, Ranglistenplätze verschieben sich sichtbar. Die Übersicht wird beim Aktualisieren nicht mehr neu aufgebaut, sondern nur an den geänderten Stellen angepasst – laufende Animationen bleiben erhalten. Mit „Bewegung reduzieren“ im Betriebssystem ist alles abgeschaltet
+
 ## 0.9.3
 
 - Solcast: Eine neu eingetragene Resource-ID oder ein neuer API-Schlüssel wird jetzt sofort abgerufen – bisher konnte es bis zur nächsten Stunde dauern, wenn die ID nach dem Schlüssel eingetragen wurde. Weiterhin höchstens ein Abruf pro Dachfläche und Stunde

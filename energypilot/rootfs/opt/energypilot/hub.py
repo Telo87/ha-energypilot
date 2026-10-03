@@ -1637,7 +1637,9 @@ class Hub:
             "produced_kwh": round(produced / 1000, 2),
             "pv_range": pv_range,
             "load": {k: round(v / 1000, 2) for k, v in load.items()} if any(load.values()) else None,
-            "plan": {k: v for k, v in self.plan.items() if k not in ("steps", "energy")},
+            # the overview only needs the modes of the next hours (small timeline), not the whole plan
+            "plan": {**{k: v for k, v in self.plan.items() if k not in ("steps", "energy")},
+                     "next": [{"ts": st["ts"], "mode": st["mode"]} for st in self.plan.get("steps", [])[:12]]},
             "status": {k: {**v, "label": source_label(k) if not k.startswith("act:") else k[4:]} for k, v in self.status.items()},
             "backfill": self.backfill,
             "ha": self.ha.available,

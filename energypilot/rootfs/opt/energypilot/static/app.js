@@ -51,6 +51,8 @@
     if (changed) flash(a);
   }
   function morphChildren(cur, next) {
+    const flip = cur.nodeType === 1 && cur.hasAttribute('data-flip') && !reducedMotion()
+      ? new Map(Array.from(cur.children).map((n) => [n, n.getBoundingClientRect().top])) : null;
     const keyed = new Map();
     Array.from(cur.childNodes).forEach((n) => { const k = keyOf(n); if (k) keyed.set(k, n); });
     const list = Array.from(next.childNodes);
@@ -64,10 +66,23 @@
       morphNode(na, nb);
     });
     while (cur.childNodes.length > list.length) cur.lastChild.remove();
+    if (flip) Array.from(cur.children).forEach((n) => {
+      const dy = flip.has(n) ? flip.get(n) - n.getBoundingClientRect().top : 0;
+      if (Math.abs(dy) > 1) n.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.2,.7,.2,1)' });
+    });
+  }
+  function labelTables(root) {
+    root.querySelectorAll('table.stack').forEach((t) => {
+      const heads = Array.from(t.querySelectorAll('thead th')).map((th) => th.textContent.trim());
+      t.querySelectorAll('tbody tr').forEach((tr) => Array.from(tr.children).forEach((td, i) => {
+        if (td.colSpan === 1 && heads[i] && td.getAttribute('data-label') !== heads[i]) td.setAttribute('data-label', heads[i]);
+      }));
+    });
   }
   function morph(target, html) {
     const tpl = document.createElement('template');
     tpl.innerHTML = html;
+    labelTables(tpl.content);
     morphChildren(target, tpl.content);
     animateCounts(target);
   }
@@ -284,7 +299,7 @@
       c.bar.values.forEach((v, i) => {
         if (v == null) return;
         const cls = `${c.bar.cls}${c.bar.clsFor ? ` ${c.bar.clsFor(i, v)}` : ''}`;
-        bars += `<path class="${cls}" d="${barPath(x(i) + gap / 2, y(0), y(v), cw - gap, cw > 8 ? 4 : 1.5)}"/>`;
+        bars += `<path class="${cls}" style="--i:${Math.round((i / n) * 40)}" d="${barPath(x(i) + gap / 2, y(0), y(v), cw - gap, cw > 8 ? 4 : 1.5)}"/>`;
       });
     }
     let bandPath = '';
@@ -313,7 +328,7 @@
     let nowMark = '';
     if (c.now && c.now >= c.xs[0] && c.now < c.xs[n - 1] + c.step) {
       const nx = (pad.l + ((c.now - c.xs[0]) / c.step) * cw).toFixed(1);
-      nowMark = `<line class="now-line" x1="${nx}" x2="${nx}" y1="${pad.t - 4}" y2="${H - pad.b}"/><text class="now-label" x="${nx}" y="${pad.t - 5}" text-anchor="middle">jetzt</text>`;
+      nowMark = `<line class="now-line" x1="${nx}" x2="${nx}" y1="${pad.t - 4}" y2="${H - pad.b}"/><text class="now-label" x="${nx}" y="${pad.t - 5}" text-anchor="middle">jetzt</text><circle class="now-ping" cx="${nx}" cy="${H - pad.b}" r="3.5"/><circle class="now-dot" cx="${nx}" cy="${H - pad.b}" r="3.5"/>`;
     }
     const drawIn = !el.querySelector('svg');
     el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px" class="${drawIn && !c.noAnim ? 'draw-in' : ''}">
@@ -337,6 +352,8 @@
       if (c.band && c.band.lo[i] != null && c.band.hi[i] != null) rows.push(`<div class="row-t"><span><i class="box" style="background:${c.band.color}"></i>${esc(c.band.label)}</span><span>${c.fmt(c.band.lo[i])} – ${c.fmt(c.band.hi[i])}</span></div>`);
       if (!rows.length) { tip.style.display = 'none'; return; }
       tip.innerHTML = `<b>${(c.head || fmtHour)(c.xs[i])}</b>${rows.join('')}`;
+      const fresh = tip.style.display === 'none';  // appears in place, then glides with the pointer
+      tip.style.transition = fresh ? 'none' : '';
       tip.style.display = '';
       const cx = ((x(i) + cw / 2) / W) * r.width;
       const tw = tip.offsetWidth;
@@ -361,8 +378,8 @@
     const all = store.get('legendAll', false);
     const shown = all ? lines : lines.filter((l) => !hidden.has(l.key));
     const more = lines.length - shown.length;
-    const toggle = more ? `<button class="more" data-legend-more>+${more} weitere</button>`
-      : all && lines.some((l) => hidden.has(l.key)) ? '<button class="more" data-legend-more>weniger</button>' : '';
+    const toggle = more ? `<button class="more" data-legend-more title="Alle Prognosequellen zum Ein- und Ausblenden anzeigen">${ic('sliders')}Quellen vergleichen (+${more})</button>`
+      : all && lines.some((l) => hidden.has(l.key)) ? `<button class="more" data-legend-more>${ic('x')}Auswahl schließen</button>` : '';
     return `<div class="legend">${bar ? `<span class="static"><i class="box" style="background:${bar.color}"></i>${esc(bar.label)}</span>` : ''}${shown.map((l) => `<button data-series="${esc(l.key)}" class="${hidden.has(l.key) ? 'off' : ''}" aria-pressed="${!hidden.has(l.key)}"><i style="background:${l.color}"></i>${esc(l.label)}</button>`).join('')}${toggle}</div>`;
   }
   function hiddenSet(ranking, all) {
@@ -372,9 +389,10 @@
     const top = (ranking && ranking.length ? ranking : all).slice(0, 3);
     return new Set(all.filter((s) => !top.includes(s) && !s.startsWith('load:')));  // consumption stays visible
   }
-  function toggleHidden(key) {
-    const cur = new Set(store.get('hidden', null) || []);
-    if (!store.get('hidden', null)) $$('.legend button.off').forEach((b) => cur.add(b.dataset.series));
+  // "hidden" is the set currently in use: on the first click nothing is stored yet, and the
+  // sources folded away behind "Quellen vergleichen" have no chip to read their state from
+  function toggleHidden(key, hidden) {
+    const cur = new Set(store.get('hidden', null) || hidden || []);
     if (cur.has(key)) cur.delete(key); else cur.add(key);
     store.set('hidden', [...cur]);
   }
@@ -395,6 +413,7 @@
     { id: 'setup', title: 'Einrichtung', icon: 'checkCircle', section: 'Verwaltung' },
     { id: 'settings', title: 'Einstellungen', icon: 'gear' },
   ];
+  const TABS = ['dashboard', 'plan', 'prices', 'day'];
   // small number in the menu: problems (red), otherwise notes that need a look (orange)
   function setupBadge() {
     const sm = (S.check && S.check.summary) || {};
@@ -406,6 +425,11 @@
     const cur = currentPage();
     $('#nav').innerHTML = PAGES.map((p) => `${p.section ? `<div class="nav-section">${p.section}</div>` : ''}
       <a href="#/${p.id}" class="${p.id === cur ? 'active' : ''}">${ic(p.icon)}<span>${p.title}</span>${p.id === 'setup' ? setupBadge() : ''}</a>`).join('');
+    // phones: the four pages of "today" within reach of the thumb, the rest behind "Mehr"
+    const tabs = PAGES.filter((p) => TABS.includes(p.id));
+    $('#tabbar').innerHTML = `${tabs.map((p) => `<a href="#/${p.id}" class="${p.id === cur ? 'active' : ''}">${ic(p.icon)}<span>${p.title === 'Tagesverlauf' ? 'Verlauf' : p.title === 'Strompreise' ? 'Preise' : p.title}</span></a>`).join('')}
+      <button type="button" id="tabMore" class="${TABS.includes(cur) ? '' : 'active'}">${ic('menu')}<span>Mehr</span>${setupBadge()}</button>`;
+    $('#tabMore').addEventListener('click', () => $('#app').classList.toggle('nav-open'));
   }
   function currentPage() {
     const id = (location.hash.replace(/^#\/?/, '').split('?')[0]) || 'dashboard';
@@ -432,9 +456,10 @@
   function watchPageIn() {
     const content = $('#content');
     new MutationObserver(() => {
+      labelTables(content);
       if (!S.pageAnim || !content.firstElementChild) return;
       if (pageIn(content)) S.pageAnim = false;
-    }).observe(content, { childList: true });
+    }).observe(content, { childList: true, subtree: true });
   }
 
   let renderToken = 0;
@@ -516,23 +541,27 @@
       const w = (k, v) => (v == null ? '–' : cnt(k, nf(Math.abs(v) >= 1000 ? v / 1000 : v, Math.abs(v) >= 1000 ? 2 : 0)));
       const wu = (v) => (v == null ? '' : Math.abs(v) >= 1000 ? 'kW' : 'W');
       // "Jetzt": what to do + where the power flows – the most important information first
-      const flowNode = (icon, cls, label, value, sub) => `<div class="flow-node"><div class="fn-head"><span class="kpi-icon ${cls}">${ic(icon)}</span>${label}</div><div class="fn-value">${value}</div><div class="fn-sub">${sub}</div></div>`;
-      const wv = (k, v) => `${w(k, v)}${v == null ? '' : `<small>${wu(v)}</small>`}`;
       const m = plan && plan.ok ? MODE[plan.decision] : null;
-      const decision = m ? `<div class="now-decision m-${plan.decision}">
+      const next = (plan && plan.next) || [];
+      const modeLine = next.length > 2 ? `<div class="mode-line" role="img" aria-label="Empfehlung der nächsten Stunden">${next.map((st) => `<i class="m-${st.mode}" title="${fmtHour(st.ts)} Uhr: ${MODE[st.mode][0]}"></i>`).join('')}</div>
+          <div class="mode-ticks">${next.map((st, i) => `<span>${i % 3 === 0 ? fmtHour(st.ts) : ''}</span>`).join('')}</div>
+          <div class="mode-key">${Object.keys(MODE).filter((k) => next.some((st) => st.mode === k)).map((k) => `<span><i class="m-${k}"></i>${MODE[k][0]}</span>`).join('')}</div>` : '';
+      const decision = m ? `<div class="now-decision m-${plan.decision}" data-flash="${plan.decision}">
           <div class="now-kicker">Empfehlung jetzt${plan.at ? ` <span class="faint" style="text-transform:none;letter-spacing:0;font-weight:500">· Stand ${fmtHour(plan.at)}</span>` : ''}</div>
-          <div class="now-title"><span class="avatar ${m[2]}">${ic(m[1])}</span>${esc(plan.label)}</div>
+          <div class="now-title"><span class="avatar big ${m[2]}">${ic(m[1])}</span>${esc(plan.label)}</div>
           <p class="muted">${esc(plan.text)}</p>
+          ${modeLine}
           <div class="row wrap" style="gap:8px"><span class="badge ${plan.buy_now ? 'accent' : ''}">Strom kaufen: ${plan.buy_now ? 'ja' : 'nein'}</span><a class="btn sm" href="#/plan">${ic('battery')}Zur Planung</a><a class="btn sm" href="#/plan?why=1">${ic('info')}Warum?</a></div></div>`
         : `<div class="now-decision"><div class="now-kicker">Empfehlung jetzt</div><div class="now-title">Noch kein Plan</div><p class="muted">${esc((plan && plan.reason) || 'Wird berechnet …')}</p></div>`;
-      const flows = [
-        flowNode('solar', 'warn', 'PV-Erzeugung', wv('pv', pvNow), pvVals.length ? `${allAsleep && !pvVals.some((v) => v > 0) ? 'Wechselrichter aus – keine Sonne' : ov.arrays.map((a) => { const x = lv[`pv:${a.id}`]; const w = pvW(a); return `${esc(a.name)} ${w != null ? fmtW(w) : x && x.value != null ? 'Zähler' : '–'}`; }).join(' · ')}${nowcastText(plan)}` : missing()),
-        flowNode('home', '', 'Hausverbrauch', wv('house', val('house')), lv.house ? (ov.load ? `Grundverbrauch heute ~${nf(ov.load.today, 1)} kWh` : 'aktuell') : missing()),
-        flowNode('battery', 'ok', 'Akku', soc == null ? '–' : `${cnt('soc', nf(soc, 0))}<small>%</small>`, `${bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'}${rt && (rt.empty_at || rt.until) ? ` · Prognose: ${rt.empty_at ? `leer ${fmtWhen(rt.empty_at).replace(' ', ' um ')}` : `reicht über ${fmtWhen(rt.until, true)} hinaus`}` : ''}`),
-        // like the battery card: the title names the device, the line below says which way the power flows
-        flowNode('plug', grid != null && grid < -20 ? 'ok' : '', 'Netz', wv('grid', grid == null ? null : Math.abs(grid)), lv.grid ? (grid > 20 ? '<b>Netzbezug</b> – Strom wird gekauft' : grid < -20 ? '<b>Einspeisung</b> – Überschuss geht ins Netz' : 'ausgeglichen – kein Bezug, keine Einspeisung') : missing()),
-      ].join('');
-      const nowCard = `<div class="card now-card"><div class="card-body now-grid">${decision}<div class="flow-grid">${flows}</div></div></div>`;
+      const house = val('house');
+      const notes = [
+        ['pv', 'PV', pvVals.length ? `${allAsleep && !pvVals.some((v) => v > 0) ? 'Wechselrichter aus – keine Sonne' : ov.arrays.map((a) => { const x = lv[`pv:${a.id}`]; const w = pvW(a); return `${esc(a.name)} ${w != null ? fmtW(w) : x && x.value != null ? 'Zähler' : '–'}`; }).join(' · ')}${nowcastText(plan)}` : missing()],
+        ['house', 'Haus', lv.house ? (ov.load ? `Grundverbrauch heute ~${nf(ov.load.today, 1)} kWh` : 'aktueller Verbrauch') : missing()],
+        ['bat', 'Akku', `${bp == null ? (lv.battery_soc ? 'Ladezustand' : missing()) : bp > 30 ? `lädt mit ${fmtW(bp)}` : bp < -30 ? `entlädt mit ${fmtW(-bp)}` : 'Ruhezustand'}${rt && (rt.empty_at || rt.until) ? ` · Prognose: ${rt.empty_at ? `leer ${fmtWhen(rt.empty_at).replace(' ', ' um ')}` : `reicht über ${fmtWhen(rt.until, true)} hinaus`}` : ''}`],
+        // the title names the device, the line says which way the power flows
+        ['grid', 'Netz', lv.grid ? (grid > 20 ? '<b>Netzbezug</b> – Strom wird gekauft' : grid < -20 ? '<b>Einspeisung</b> – Überschuss geht ins Netz' : 'ausgeglichen – kein Bezug, keine Einspeisung') : missing()],
+      ].map(([cls, label, text]) => `<div class="flow-note"><i class="fdot ${cls}"></i><div><b>${label}</b> <span>${text}</span></div></div>`).join('');
+      const nowCard = `<div class="card now-card"><div class="card-body now-grid">${decision}<div class="flow-wrap">${flowSVG(pvNow, house, grid, bp, soc)}<div class="flow-notes">${notes}</div></div></div></div>`;
       const kpis = [
         kpi('price', 'euro', pr && avg != null && pr.price <= avg ? 'ok' : 'warn', 'Strompreis jetzt', pr ? cnt('price', nf(pr.price, 1)) : '–', pr ? 'ct/kWh' : '', pr ? `Börse ${nf(pr.spot, 1)} ct · Ø heute ${nf(avg, 1)} ct` : 'noch keine Preise'),
         kpi('today', 'sun', 'up', 'PV heute', cnt('prod', nf(ov.produced_kwh, 1)), 'kWh', best ? `Prognose ${nf(best.today, 1)} kWh${ov.pv_range ? ` (${nf(ov.pv_range.today[0], 0)}–${nf(ov.pv_range.today[1], 0)})` : ''} · morgen ${nf(best.tomorrow, 1)} kWh` : 'noch keine Prognose'),
@@ -549,21 +578,21 @@
       const acc = (ov.accuracy || []).slice(0, 5);
       const bf = ov.backfill;
       const chk = S.check && S.check.summary.err ? `<a class="notice setup-hint" href="#/setup">${ic('alert')}<div><b>${S.check.summary.err} ${S.check.summary.err === 1 ? 'Einstellung braucht' : 'Einstellungen brauchen'} Aufmerksamkeit</b> – zur Einrichtung</div></a>` : '';
-      el.innerHTML = `${chk}${nowCard}<div class="grid kpis">${kpis}</div>
+      render(el, `${chk}${nowCard}<div class="grid kpis">${kpis}</div>
         <div class="grid dash">
           <div class="card"><div class="card-head"><h2>PV-Erzeugung &amp; Verbrauch – heute und morgen <span class="sub">stündlich · Prognose kurzfristig</span></h2></div>
-            <div class="card-body">${legendHTML({ ...MEASURED, label: 'Gemessen', color: 'var(--measured)' }, lines, hidden)}<div class="chart tall" id="pvChart"></div></div></div>
+            <div class="card-body">${legendHTML({ ...MEASURED, label: 'Gemessen', color: 'var(--measured)' }, lines, hidden)}<div class="chart tall" id="pvChart" data-keep></div></div></div>
           <div class="card"><div class="card-head"><h2>Genauigkeit <span class="sub">Rangliste · letzte 30 Tage · Prognose vom Vortag</span></h2><a class="btn sm" href="#/accuracy">Details</a></div>
-            <div class="card-body flush"><div class="list">${acc.length ? acc.map((r, i) => `<div class="list-item"><span class="rank ${i === 0 ? 'r1' : ''}">${i + 1}</span><span class="swatch-dot" style="background:${srcColor(r.source)}"></span><div class="grow"><div class="title">${esc(r.label)}</div><div class="meta">Fehler je Stunde Ø ${pct(r.nmae_pct, 0)} · je Tag Ø ${pct(r.day_nmae_pct, 0)} · ${r.days} Tage</div></div><b class="num" title="Genauigkeit = 100 % minus Fehler je Stunde">${pct(r.score, 0)}</b></div>`).join('')
+            <div class="card-body flush"><div class="list" data-flip>${acc.length ? acc.map((r, i) => `<div class="list-item" data-key="acc-${esc(r.source)}"><span class="rank ${i === 0 ? 'r1' : ''}">${i + 1}</span><span class="swatch-dot" style="background:${srcColor(r.source)}"></span><div class="grow"><div class="title">${esc(r.label)}</div><div class="meta">Fehler je Stunde Ø ${pct(r.nmae_pct, 0)} · je Tag Ø ${pct(r.day_nmae_pct, 0)} · ${r.days} Tage</div></div><b class="num" title="Genauigkeit = 100 % minus Fehler je Stunde">${pct(r.score, 0)}</b></div>`).join('')
               : `<div class="muted" style="padding:6px 18px 14px;font-size:13px">Sobald Messwerte und Prognosen für einige Tage vorliegen, erscheint hier die Rangliste der Prognosequellen.</div>`}</div></div></div>
         </div>
         <div class="grid dash">
           <div class="card"><div class="card-head"><h2>Strompreis heute &amp; morgen <span class="sub">inkl. Aufschläge und MwSt</span></h2><a class="btn sm" href="#/prices">Details</a></div>
-            <div class="card-body"><div class="chart" id="priceChart"></div></div></div>
+            <div class="card-body"><div class="chart" id="priceChart" data-keep></div></div></div>
           <div class="card"><div class="card-head"><h2>Datenquellen</h2></div>
             <div class="card-body flush">${bf.running ? `<div style="padding:4px 18px 12px"><div class="muted" style="font-size:13px">${ic('database')} ${esc(bf.text)} (${bf.done}/${bf.total})</div><div class="progress"><i style="width:${(bf.done / Math.max(1, bf.total)) * 100}%"></i></div></div>` : ''}
               <div class="list status-list">${statusRows || '<div class="muted" style="padding:6px 18px 14px;font-size:13px">Erster Abruf läuft …</div>'}</div></div></div>
-        </div>`;
+        </div>`);
       // PV chart: today + tomorrow
       if (day && tomorrow) {
         const xs = [...day.hours, ...tomorrow.hours];
@@ -573,9 +602,9 @@
         const bd = (d, k) => ((d.band || {}).d0 || {})[k] || d.hours.map(() => null);
         const band = !hidden.has('ep') && sources.includes('ep') ? { ...BAND, lo: [...bd(day, 'lo'), ...bd(tomorrow, 'lo')], hi: [...bd(day, 'hi'), ...bd(tomorrow, 'hi')] } : null;
         chart($('#pvChart'), { xs, step: 3600, bar, lines: ln, band, fmt: (v) => fmtW(v).replace('W', 'Wh'), axisFmt: (v) => (v >= 1000 ? `${nf(v / 1000, 1)} kWh` : `${nf(v)} Wh`), head: (ts) => `${fmtDay(ts)} ${fmtHour(ts)}–${fmtHour(ts + 3600)}`, tick: (ts) => (new Date(ts * 1000).getHours() === 0 ? fmtDay(ts) : fmtHour(ts)), tickAt: (ts) => new Date(ts * 1000).getHours() % 6 === 0, height: 280, now: ov.now, noAnim: drawn, onClick: (i) => { location.hash = `#/day?d=${i < day.hours.length ? day.day : tomorrow.day}`; } });
-        $$('.legend button[data-series]', el).forEach((b) => b.addEventListener('click', () => { toggleHidden(b.dataset.series); draw(S.overview); }));
+        $$('.legend button[data-series]', el).forEach((b) => on(b, 'click', () => { toggleHidden(b.dataset.series, hidden); draw(S.overview); }));
       }
-      priceChart($('#priceChart'), ov.prices, ov.now, 200);
+      priceChart($('#priceChart'), ov.prices, ov.now, 200, drawn);
       drawn = true;
     };
     await load();
@@ -584,13 +613,56 @@
     S.cleanup.push(() => clearInterval(timer));
   }
 
-  function priceChart(el, slots, now, height = 220) {
+  // Energy flow: who feeds whom right now, split from the live values (W)
+  function flowSplit(pv, house, grid, bp) {
+    const P = Math.max(0, pv || 0); const H = Math.max(0, house || 0);
+    const imp = Math.max(0, grid || 0); const exp = Math.max(0, -(grid || 0));
+    const chg = Math.max(0, bp || 0); const dis = Math.max(0, -(bp || 0));
+    const pvHouse = Math.min(P, H); let rest = P - pvHouse;
+    // the sensors are never exactly in step: the grid meter counts first, the battery takes the rest
+    const pvGrid = Math.min(rest, exp); rest -= pvGrid;
+    const pvBat = Math.min(rest, chg);
+    const gridBat = Math.min(imp, Math.max(0, chg - pvBat));
+    const batHouse = Math.min(dis, Math.max(0, H - pvHouse));
+    const batGrid = Math.min(Math.max(0, dis - batHouse), Math.max(0, exp - pvGrid));
+    return { pvHouse, pvBat, pvGrid, gridBat, batGrid, batHouse, gridHouse: Math.max(0, imp - gridBat) };
+  }
+  const FLOW_MIN = 30;  // W – below this a line rests
+  function flowSVG(pv, house, grid, bp, soc) {
+    const f = flowSplit(pv, house, grid, bp);
+    const speed = (w) => (w < 300 ? 1 : w < 1000 ? 2 : w < 3000 ? 3 : 4);
+    // path direction = direction of the flow; the grid–battery line can run both ways
+    const line = (d, w, cls, label, rev = false) => `<path class="fl-base" d="${d}"/><path class="fl-dots ${cls}${w >= FLOW_MIN ? ` on sp${speed(w)}` : ''}${rev ? ' rev' : ''}" d="${d}"><title>${label}${w >= FLOW_MIN ? `: ${fmtW(w)}` : ''}</title></path>`;
+    const gb = f.batGrid >= FLOW_MIN && f.batGrid > f.gridBat;
+    const lines = [
+      line('M170 90V210', f.pvBat, 'c-pv', 'PV → Akku'),
+      line('M92 150H248', f.gridHouse, 'c-grid', 'Netz → Haus'),
+      line('M206 64C260 70 284 92 288 110', f.pvHouse, 'c-pv', 'PV → Haus'),
+      line('M134 64C80 70 56 92 52 110', f.pvGrid, 'c-pv', 'PV → Netz'),
+      line('M206 236C260 230 284 208 288 190', f.batHouse, 'c-bat', 'Akku → Haus'),
+      line('M52 190C56 208 80 230 134 236', gb ? f.batGrid : f.gridBat, gb ? 'c-bat' : 'c-grid', gb ? 'Akku → Netz' : 'Netz → Akku', gb),
+    ].join('');
+    const num = (key, v) => (v == null ? '–' : `${cnt(key, nf(Math.abs(v) >= 1000 ? v / 1000 : v, Math.abs(v) >= 1000 ? 2 : 0)).replace('<span', '<tspan').replace('</span>', '</tspan>')}<tspan class="u"> ${Math.abs(v) >= 1000 ? 'kW' : 'W'}</tspan>`);
+    const node = (cx, cy, cls, icon, value, label, extra = '') => `<g class="fn ${cls}"><circle class="fn-bg" cx="${cx}" cy="${cy}" r="40"/>${extra}<svg class="i" x="${cx - 10}" y="${cy - 30}" width="20" height="20" viewBox="0 0 24 24">${P[icon]}</svg><text class="fn-v" x="${cx}" y="${cy + 10}" text-anchor="middle">${value}</text><text class="fn-l" x="${cx}" y="${cy + 25}" text-anchor="middle">${label}</text></g>`;
+    const C = 2 * Math.PI * 40;
+    const ring = soc == null ? '' : `<circle class="fn-ring" cx="170" cy="250" r="40" transform="rotate(-90 170 250)" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - Math.max(0, Math.min(100, soc)) / 100)).toFixed(1)}"/>`;
+    const charging = bp != null && bp > FLOW_MIN; const discharging = bp != null && bp < -FLOW_MIN;
+    return `<svg class="flow" viewBox="0 0 340 300" role="img" aria-label="Energiefluss: PV, Haus, Akku und Netz">
+      <g class="fl">${lines}</g>
+      ${node(170, 50, `pv${pv > FLOW_MIN ? ' on' : ''}`, 'solar', num('pv', pv), 'PV')}
+      ${node(52, 150, `grid${grid > 20 ? ' imp' : grid < -20 ? ' exp' : ''}`, 'plug', num('grid', grid == null ? null : Math.abs(grid)), grid > 20 ? 'Bezug' : grid < -20 ? 'Einspeisung' : 'Netz')}
+      ${node(288, 150, 'house on', 'home', num('house', house), 'Haus')}
+      ${node(170, 250, `bat on${charging ? ' charging' : ''}`, 'battery', soc == null ? '–' : `${cnt('soc', nf(soc, 0)).replace('<span', '<tspan').replace('</span>', '</tspan>')}<tspan class="u"> %</tspan>`, charging ? 'lädt' : discharging ? 'entlädt' : 'Akku', ring)}
+    </svg>`;
+  }
+
+  function priceChart(el, slots, now, height = 220, noAnim = false) {
     if (!el) return;
     const xs = slots.map((s) => s.ts);
     const step = slots.length > 1 ? slots[1].ts - slots[0].ts : 900;
     const values = slots.map((s) => s.price);
     chart(el, {
-      xs, step, lines: [], height, now,
+      xs, step, lines: [], height, now, noAnim,
       bar: { label: 'Strompreis', color: 'var(--price)', cls: 'bar-p', values, clsFor: (i, v) => `${v < 0 ? 'neg' : ''} ${xs[i] + step <= now ? 'past' : ''}` },
       fmt: (v) => ctkwh(v, 2), axisFmt: (v) => `${nf(v)} ct`,
       head: (ts) => `${fmtDay(ts)} ${fmtHour(ts)}–${fmtHour(ts + step)}`,
@@ -930,7 +1002,7 @@
         bestIn[c] = vals.length ? Math.min(...vals) : null;
       });
       const classTable = hasClasses ? `<div class="card"><div class="card-head"><h2>Nach Wetterlage <span class="sub">Stundenfehler relativ zur Erzeugung – kleiner ist besser</span></h2></div>
-        <div class="card-body flush"><div class="table-wrap"><table class="table"><thead><tr><th>Quelle</th>${Object.entries(CLASS_LABEL).map(([k, [l, icon]]) => `<th class="num">${ic(icon)} ${l} <span class="faint">(${counts2[k]} T.)</span></th>`).join('')}</tr></thead><tbody>
+        <div class="card-body flush"><div class="table-wrap"><table class="table stack"><thead><tr><th>Quelle</th>${Object.entries(CLASS_LABEL).map(([k, [l, icon]]) => `<th class="num">${ic(icon)} ${l} <span class="faint">(${counts2[k]} T.)</span></th>`).join('')}</tr></thead><tbody>
         ${res.map((r) => `<tr><td><div class="cell-main" style="min-width:160px"><span class="swatch-dot" style="background:${srcColor(r.source)}"></span><span class="t">${esc(r.label)}</span></div></td>${Object.keys(CLASS_LABEL).map((c) => { const v = r.by_class && r.by_class[c]; return `<td class="num ${v && v.nmae_pct === bestIn[c] ? 'best' : ''}">${v ? `${pct(v.nmae_pct, 0)} <span class="faint">(${signed(v.bias_pct, 0)} %)</span>` : '–'}</td>`; }).join('')}</tr>`).join('')}
         </tbody></table></div><div class="muted" style="padding:10px 18px 12px;font-size:12.5px;border-top:1px solid var(--border)">Wetterlage aus der gemessenen Erzeugung im Verhältnis zu einem wolkenlosen Tag: sonnig ≥ 60 %, wechselhaft 30–60 %, trüb &lt; 30 %. In Klammern die systematische Abweichung (+ = Prognose zu hoch).</div></div></div>` : '';
       const ranking = res.map((r) => r.source);
@@ -941,7 +1013,7 @@
         <div class="card"><div class="card-head"><h2>Rangliste</h2></div>
           <div class="card-body flush"><p class="explain" style="padding:0 18px">${ic('trophy')} Am genauesten: <b>${esc(res[0].label)}</b> – Genauigkeit ${pct(res[0].score, 1)}, beim ${what} im Mittel ${pct(res[0].day_nmae_pct)} daneben.
             <span class="faint">Sortiert nach Genauigkeit = 100 % minus mittlerer Fehler je Stunde relativ zum Messwert – für die Planung zählt jede Stunde. Tagesabweichung = Fehler beim ${what}; dort kann eine andere Quelle vorn liegen, weil sich Fehler über den Tag ausgleichen. Tendenz = systematische Über- (+) oder Unterschätzung.${isLoad ? ' Grundverbrauch = Hausverbrauch ohne E-Auto und Heizstab; „Wie vor einer Woche“ ist der Vergleichsmaßstab.' : ''}</span></p>
-          <div class="table-wrap"><table class="table"><thead><tr><th></th><th>Quelle</th><th>Genauigkeit</th><th class="num">Tagesabw. Ø</th><th class="num">Tendenz</th><th class="num">Größter Tagesfehler</th><th class="num hide-md">Stundenfehler Ø</th><th class="num hide-md">RMSE</th><th class="num">Tage</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
+          <div class="table-wrap"><table class="table stack ranked"><thead><tr><th></th><th>Quelle</th><th>Genauigkeit</th><th class="num">Tagesabw. Ø</th><th class="num">Tendenz</th><th class="num">Größter Tagesfehler</th><th class="num hide-md">Stundenfehler Ø</th><th class="num hide-md">RMSE</th><th class="num">Tage</th></tr></thead><tbody>${rows}</tbody></table></div></div></div>
         ${trendCard(isLoad)}
         ${isLoad ? '' : modelCard(d.model)}
         ${classTable}
@@ -964,7 +1036,7 @@
         fmt: (v) => kwh(v), axisFmt: (v) => `${nf(v)} kWh`, head: (ts) => fmtDay(ts), tick: (ts) => new Date(ts * 1000).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }), tickCenter: true,
         onClick: (i) => { location.hash = `#/day?d=${days[i]}`; },
       });
-      $$('.legend button[data-series]', el).forEach((b) => b.addEventListener('click', () => { toggleHidden(b.dataset.series); draw(d); }));
+      $$('.legend button[data-series]', el).forEach((b) => b.addEventListener('click', () => { toggleHidden(b.dataset.series, hidden); draw(d); }));
       bind();
     };
     const bind = () => {
@@ -1053,7 +1125,7 @@
       if ($('#dToday')) $('#dToday').addEventListener('click', () => go(today));
       $$('#dHz button').forEach((b) => b.addEventListener('click', () => { cfg.horizon = b.dataset.v; draw(); }));
       $$('#dSeries button').forEach((b) => b.addEventListener('click', () => { if (b.dataset.v === cfg.series) return; cfg.series = b.dataset.v; store.set('dayCfg', cfg); navigate(); }));
-      $$('.legend button[data-series]', el).forEach((b) => b.addEventListener('click', () => { toggleHidden(b.dataset.series); draw(); }));
+      $$('.legend button[data-series]', el).forEach((b) => b.addEventListener('click', () => { toggleHidden(b.dataset.series, hidden); draw(); }));
     };
     draw();
   }
