@@ -254,6 +254,17 @@ async def cost_months(request: web.Request) -> web.Response:
     return _ok(await asyncio.to_thread(_hub(request).cost_months, 12))
 
 
+@routes.get("/api/direct")
+async def direct_info(request: web.Request) -> web.Response:
+    """State of the direct access for the guide in the settings."""
+    options: Options = request.app["options"]
+    return _ok({
+        "password": bool(options.direct_password),
+        "port": await _hub(request).ha.direct_port(),
+        "direct": request.remote != INGRESS_PROXY and not options.allow_all,  # this page was opened directly
+    })
+
+
 @routes.get("/api/setup-check")
 async def setup_check(request: web.Request) -> web.Response:
     from . import setupcheck

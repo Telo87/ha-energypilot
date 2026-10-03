@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.1
+
+- Einstellungen: neuer Reiter **„Handy-App“** mit der Anleitung für den Direktzugriff Schritt für Schritt. Er zeigt, welche Schritte schon erledigt sind (Passwort gesetzt, Port freigegeben), und nennt die fertige Adresse zum Öffnen auf dem Handy
+- Die Anleitung empfiehlt jetzt Port 8199 statt 8099 – 8099 ist auf vielen Installationen schon belegt, dann startet das Add-on nicht („port 8099 is already in use“)
+
 ## 0.11.0
 
 - **Als App auf dem Handy:** EnergyPilot lässt sich jetzt auch direkt öffnen – ohne die Oberfläche von Home Assistant – und auf dem Handy „zum Home-Bildschirm“ hinzufügen. Es startet dann im Vollbild mit eigenem Symbol. Dafür in der Konfiguration des Add-ons ein **Passwort für den Direktzugriff** setzen und unter „Netzwerk“ einen Port freigeben; beides ist standardmäßig aus, ohne Passwort bleibt EnergyPilot nur über Home Assistant erreichbar. Anleitung unter Einstellungen › Darstellung und in der Dokumentation

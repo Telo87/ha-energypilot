@@ -257,12 +257,15 @@ rechnet `Preis ÷ (1 + MwSt) − Börsenpreis` für jede Viertelstunde aus und �
 ## Als App auf dem Handy (Direktzugriff)
 
 Über Home Assistant bleibt dessen Kopfzeile mit dem Menü immer sichtbar. Wer EnergyPilot wie eine eigene
-App nutzen möchte, schaltet den Direktzugriff ein:
+App nutzen möchte, schaltet den Direktzugriff ein (die Anleitung mit dem Stand der einzelnen Schritte steht auch
+unter Einstellungen › Handy-App):
 
 1. Add-on › **Konfiguration**: ein **Passwort für den Direktzugriff** eintragen.
-2. Auf derselben Seite unter **Netzwerk** einen Port eintragen (z. B. 8099) und speichern; das Add-on startet neu.
+2. Auf derselben Seite unter **Netzwerk** in das leere Feld neben „8099/tcp“ eine freie Portnummer eintragen
+   (z. B. 8199) und speichern; das Add-on startet neu. Meldet Home Assistant „port … is already in use“, ist die
+   Nummer belegt und das Add-on startet nicht – dann eine andere Zahl eintragen und das Add-on wieder starten.
 3. Auf dem Handy im Browser `http://<Adresse von Home Assistant>:<Port>` öffnen, z. B.
-   `http://homeassistant.local:8099`, und mit dem Passwort anmelden.
+   `http://homeassistant.local:8199`, und mit dem Passwort anmelden.
 4. **iPhone (Safari):** Teilen-Symbol › „Zum Home-Bildschirm“. **Android (Chrome):** Menü › „Zum Startbildschirm
    hinzufügen“ bzw. „App installieren“.
 

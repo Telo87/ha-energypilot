@@ -78,6 +78,18 @@ class HomeAssistant:
     async def config(self) -> dict:
         return await self._get("config") or {}
 
+    async def direct_port(self) -> int | None:
+        """Host port the user opened for direct access under "Network" (None: not opened / not an add-on)."""
+        if not os.environ.get("SUPERVISOR_TOKEN"):
+            return None
+        try:
+            async with self._sess().get("http://supervisor/addons/self/info") as resp:
+                network = ((await resp.json()).get("data") or {}).get("network") or {}
+            port = next((v for k, v in network.items() if k.endswith("/tcp")), None)
+            return int(port) if port else None
+        except (aiohttp.ClientError, TimeoutError, ValueError, TypeError, AttributeError):
+            return None
+
     async def states(self) -> list[dict]:
         return await self._get("states") or []
 

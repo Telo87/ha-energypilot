@@ -172,6 +172,7 @@
     palette: '<path d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11.5" r="1"/><circle cx="10.5" cy="7.5" r="1"/><circle cx="15" cy="7.5" r="1"/>',
     compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
     journal: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h4"/>',
+    phone: '<rect x="6.5" y="2" width="11" height="20" rx="2.5"/><path d="M11 18.5h2"/>',
     external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
     wallet: '<path d="M20 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h15v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5"/><path d="M16 13h.01"/>',
   };
@@ -1273,7 +1274,7 @@
   }
 
   // --------------------------------------------------------------- settings
-  const SET_TABS = [['arrays', 'solar', 'PV-Anlagen'], ['sources', 'cloudSun', 'Prognosequellen'], ['tariff', 'euro', 'Strompreis'], ['battery', 'battery', 'Batterie'], ['sensors', 'sliders', 'Sensoren & Standort'], ['look', 'palette', 'Darstellung']];
+  const SET_TABS = [['arrays', 'solar', 'PV-Anlagen'], ['sources', 'cloudSun', 'Prognosequellen'], ['tariff', 'euro', 'Strompreis'], ['battery', 'battery', 'Batterie'], ['sensors', 'sliders', 'Sensoren & Standort'], ['look', 'palette', 'Darstellung'], ['app', 'phone', 'Handy-App']];
   async function renderSettings(el, token) {
     const q = query();
     let tab = q.get('tab') || store.get('settingsTab', 'arrays');
@@ -1284,7 +1285,7 @@
     el.innerHTML = `<div class="seg" id="setTabs" style="margin-bottom:16px">${SET_TABS.map(([k, icon, label]) => `<button data-tab="${k}" class="${tab === k ? 'active' : ''}">${ic(icon)}${label}</button>`).join('')}</div><div id="setBody"></div>`;
     $$('#setTabs button').forEach((b) => b.addEventListener('click', () => { if (b.dataset.tab !== tab) location.hash = `#/settings?tab=${b.dataset.tab}`; }));
     const body = $('#setBody');
-    const fn = { arrays: renderArrays, sources: renderSources, tariff: renderTariff, battery: renderBattery, sensors: renderSensors, look: renderLook }[tab];
+    const fn = { arrays: renderArrays, sources: renderSources, tariff: renderTariff, battery: renderBattery, sensors: renderSensors, look: renderLook, app: renderApp }[tab];
     await fn(body, token);
   }
 
@@ -1835,6 +1836,29 @@
     }).then(dirty));  // after withBusy re-enabled the button
   }
 
+  // Direct access: EnergyPilot on its own port, added to the phone's home screen like an app
+  async function renderApp(el) {
+    setHeader('Einstellungen', 'EnergyPilot als App auf dem Handy');
+    let d = { password: false, port: null, direct: false };
+    try { d = await api('direct'); } catch { /* older server */ }
+    const host = location.hostname;
+    const url = `http://${host}:${d.port || 8199}`;
+    const done = (ok) => `<span class="badge ${ok ? 'ok' : ''}">${ok ? `${ic('check')}erledigt` : 'offen'}</span>`;
+    const ready = d.password && d.port;
+    el.innerHTML = `<div class="card"><div class="card-head"><div class="avatar accent">${ic('phone')}</div><h2>Als App auf dem Handy<div class="faint" style="font-weight:400;font-size:12.5px">Im Vollbild, mit eigenem Symbol, ohne das Menü von Home Assistant</div></h2>${d.direct ? '<span class="badge ok">Du nutzt gerade den Direktzugriff</span>' : ''}</div>
+      <div class="card-body">
+        <p class="explain">Über Home Assistant bleibt dessen Kopfzeile immer sichtbar. Mit dem <b>Direktzugriff</b> bekommt EnergyPilot eine eigene Adresse im Heimnetz. Die legst du auf dem Handy auf den Home-Bildschirm – danach startet EnergyPilot wie eine eigene App.</p>
+        <ol class="guide">
+          <li><b>Passwort setzen</b> ${done(d.password)}<br>In Home Assistant: Einstellungen › Add-ons › EnergyPilot › <b>Konfiguration</b>. Bei „Passwort für den Direktzugriff“ ein Passwort eintragen und <b>Speichern</b>.</li>
+          <li><b>Port freigeben</b> ${done(!!d.port)}<br>Auf derselben Seite weiter unten unter <b>Netzwerk</b>: In das leere Feld links neben „8099/tcp“ eine freie Portnummer eintragen, z. B. <span class="mono">8199</span>, und <b>Speichern</b>. Das Add-on startet neu. <span class="faint">(Das „8099/tcp“ rechts ist nur die Bezeichnung; die Zahl links ist der Port in deinem Netz. Meldet Home Assistant „port … is already in use“, ist die Nummer belegt und das Add-on startet nicht – dann eine andere Zahl eintragen, z. B. 8765, und das Add-on wieder starten.)</span></li>
+          <li><b>Auf dem Handy im Browser öffnen</b><br><a href="${ready ? url : '#/settings?tab=app'}" ${ready ? 'target="_blank" rel="noopener"' : ''} class="mono">${esc(url)}</a> – mit dem Passwort anmelden. <span class="faint">Über VPN ggf. statt des Namens die IP-Adresse von Home Assistant verwenden.</span></li>
+          <li><b>Zum Home-Bildschirm hinzufügen</b><br><b>iPhone</b> (Safari): unten auf das Teilen-Symbol tippen (Quadrat mit Pfeil nach oben) › „Zum Home-Bildschirm“ › „Hinzufügen“.<br><b>Android</b> (Chrome): Menü ⋮ › „Zum Startbildschirm hinzufügen“ bzw. „App installieren“.</li>
+          <li><b>App starten</b><br>Über das neue Symbol öffnen. Die App fragt das Passwort beim ersten Start noch einmal ab und merkt es sich dann.</li>
+        </ol>
+        <p class="faint" style="font-size:12.5px;margin:14px 0 0">${ic('info')} Der Direktzugriff ist unverschlüsselt (http) und nur durch das Passwort geschützt – gedacht für das Heimnetz und VPN. Den Port nicht im Router ins Internet freigeben. Ohne Passwort ist er ausgeschaltet; nach fünf falschen Versuchen ist die Anmeldung einige Minuten gesperrt.</p>
+      </div></div>`;
+  }
+
   function renderLook(el) {
     setHeader('Einstellungen', 'Design und Akzentfarbe');
     const draw = () => {
@@ -1844,16 +1868,7 @@
           <p class="faint" style="font-size:12.5px;margin:10px 0 0">„Automatisch“ folgt der Einstellung von Betriebssystem bzw. Browser.</p></div></div>
         <div class="card" style="margin-top:16px"><div class="card-head"><h2>Akzentfarbe</h2></div><div class="card-body">
           <div class="swatches">${Object.entries(ACCENTS).map(([k, a]) => `<button class="swatch ${accent === k ? 'active' : ''}" data-accent="${k}" style="--sw:${a[1]}" title="${esc(a[0])}" aria-pressed="${accent === k}"><i>${ic('check')}</i><span>${esc(a[0])}</span></button>`).join('')}</div>
-          <p class="faint" style="font-size:12.5px;margin:12px 0 0">Gilt für Schaltflächen und Hervorhebungen. Die Farben der Prognosequellen bleiben gleich, damit jede Quelle überall wiedererkennbar ist.</p></div></div>
-        <div class="card" style="margin-top:16px"><div class="card-head"><h2>Als App auf dem Handy</h2></div><div class="card-body">
-          <p class="explain">Über Home Assistant bleibt dessen Kopfzeile mit dem Menü sichtbar. Mit dem <b>Direktzugriff</b> startet EnergyPilot vom Home-Bildschirm wie eine eigene App – im Vollbild, mit eigenem Symbol.</p>
-          <ol class="guide">
-            <li><b>Passwort setzen</b> – in Home Assistant unter Einstellungen › Add-ons › EnergyPilot › Konfiguration ein „Passwort für den Direktzugriff“ eintragen.</li>
-            <li><b>Port freigeben</b> – auf derselben Seite unter „Netzwerk“ einen Port eintragen (z. B. 8099) und speichern. Das Add-on startet neu.</li>
-            <li><b>Im Browser des Handys öffnen</b> – <span class="mono">http://&lt;Adresse von Home Assistant&gt;:&lt;Port&gt;</span>, z. B. <span class="mono">http://homeassistant.local:8099</span>, und mit dem Passwort anmelden.</li>
-            <li><b>Zum Home-Bildschirm</b> – iPhone (Safari): Teilen-Symbol › „Zum Home-Bildschirm“. Android (Chrome): Menü › „Zum Startbildschirm hinzufügen“.</li>
-          </ol>
-          <p class="faint" style="font-size:12.5px;margin:12px 0 0">Der Direktzugriff ist nur durch das Passwort geschützt und unverschlüsselt – für das Heimnetz und VPN gedacht, den Port nicht im Router ins Internet freigeben. Ohne Passwort ist er ausgeschaltet.</p></div></div>`;
+          <p class="faint" style="font-size:12.5px;margin:12px 0 0">Gilt für Schaltflächen und Hervorhebungen. Die Farben der Prognosequellen bleiben gleich, damit jede Quelle überall wiedererkennbar ist.</p></div></div>`;
       $$('[data-theme-set]', el).forEach((b) => b.addEventListener('click', () => { setTheme(b.dataset.themeSet); draw(); }));
       $$('[data-accent]', el).forEach((b) => b.addEventListener('click', () => { store.set('accent', b.dataset.accent); withTransition(applyAccent); draw(); }));
     };
