@@ -348,8 +348,13 @@
       const nx = (pad.l + ((c.now - c.xs[0]) / c.step) * cw).toFixed(1);
       nowMark = `<line class="now-line" x1="${nx}" x2="${nx}" y1="${pad.t - 4}" y2="${H - pad.b}"/><text class="now-label" x="${nx}" y="${pad.t - 5}" text-anchor="middle">jetzt</text><circle class="now-ping" cx="${nx}" cy="${H - pad.b}" r="3.5"/><circle class="now-dot" cx="${nx}" cy="${H - pad.b}" r="3.5"/>`;
     }
-    const drawIn = !el.querySelector('svg');
-    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px" class="${drawIn && !c.noAnim ? 'draw-in' : ''}">
+    // drawn for the first time: lines draw themselves, bars grow. A redraw while that still runs (fresh
+    // data right after opening the page) continues the animation where it was instead of cutting it off
+    const drawIn = !el.querySelector('svg') && !c.noAnim;
+    const since = el._drawAt ? performance.now() - el._drawAt : Infinity;
+    const going = !drawIn && since < 1300 && !reducedMotion();
+    if (drawIn) el._drawAt = performance.now();
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px${going ? `;--skip:${-Math.round(since)}ms` : ''}" class="${drawIn || going ? 'draw-in' : ''}">
       <g class="gl">${grid}</g><rect class="hover-col" x="0" y="${pad.t}" width="${cw}" height="${H - pad.t - pad.b}" style="display:none"/>
       <g>${bars}</g>${bandPath}<g class="series">${lines}</g>${nowMark}
       <rect x="${pad.l}" y="0" width="${W - pad.l - pad.r}" height="${H}" class="hit-col" style="${c.onClick ? '' : 'cursor:default'}"/>
@@ -486,6 +491,7 @@
     S.cleanup.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
     S.cleanup = [];
     charts.clear();
+    $$('#modalRoot .modal-back').forEach((m) => m.remove());  // a window of the page left behind must not stay open
     renderToken += 1;
     const page = currentPage();
     renderNav();

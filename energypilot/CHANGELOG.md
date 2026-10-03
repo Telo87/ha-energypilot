@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.6
+
+Aus der Durchsicht von Design und Animationen auf allen Seiten:
+
+- Behoben: In der Übersicht brach die Einblend-Animation der Diagramme (Linien zeichnen sich, Balken wachsen) nach wenigen Millisekunden ab, weil die Seite direkt nach dem Öffnen ein zweites Mal gezeichnet wird. Die Animation läuft jetzt an der Stelle weiter, an der sie war
+- Behoben: Ein geöffnetes Fenster (z. B. „Warum dieser Plan?“) blieb beim Wechsel auf eine andere Seite offen
+- Die Erklärtexte in den Kacheln stehen jetzt auch am Desktop vollständig da (bisher nach zwei Zeilen mit „…“ abgeschnitten)
+- Die Markierung „jetzt“ in den Diagrammen pulsiert dezenter
+
 ## 0.11.5
 
 - Planung: Statt „Empfehlung jetzt“ (steht schon in der Übersicht) zeigt die Seite oben den **Fahrplan** – den ganzen Plan als Abschnitte gleicher Empfehlung: von wann bis wann und in ganzen Sätzen, was der Akku in der Zeit macht (z. B. „Der Akku bleibt bis gegen 18:00 Uhr bei 100 % und entlädt dann auf 52 %. 21,2 kWh PV-Überschuss gehen ins Netz.“). „Warum dieser Plan?“ bleibt dort
