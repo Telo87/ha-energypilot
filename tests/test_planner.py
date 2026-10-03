@@ -11,6 +11,7 @@ from energypilot.planner import Battery, Hour, optimize
 def day(prices, pv=None, load=0.6):
     pv = pv or [0.0] * len(prices)
     return [Hour(h * 3600, pv[h], load, prices[h]) for h in range(len(prices))]
+from energypilot.sources import SourceError
 
 
 def test_charges_when_cheap_before_expensive_hours():
@@ -625,6 +626,25 @@ def test_solcast_needs_key_and_id_and_fetches_new_sites_at_once(tmp_path, monkey
     settings.update({"sources": {"solcast_key": "k2"}})
     asyncio.run(hub.fetch_forecasts())
     assert calls[-1] == ("k2", "abcd-1234")  # a new key is tried right away
+
+    # a restart (update of the add-on) must not fetch again: the last call is remembered in the database
+    n = len(calls)
+    hub2 = Hub(Options(), settings, hub.db, FakeHA())
+    asyncio.run(hub2.fetch_forecasts())
+    assert len(calls) == n
+
+    # Solcast answers "limit reached": no further call today, and the setup check explains it calmly
+    async def limit(session, key, rid):
+        calls.append("limit")
+        raise SourceError("Abruflimit erreicht – nächster Versuch später", 429)
+
+    monkeypatch.setattr(sc_mod, "fetch", limit)
+    settings.update({"sources": {"solcast_key": "k3"}})
+    asyncio.run(hub.fetch_forecasts())
+    settings.update({"sources": {"solcast_key": "k4"}})
+    asyncio.run(hub.fetch_forecasts())
+    assert calls.count("limit") == 1
+    assert "Solcast: Tageslimit erreicht" in titles() and "Solcast: Abruf fehlgeschlagen" not in titles()
 
     settings.update({"sources": {"solcast_clear": True}})
     assert "Solcast: API-Schlüssel fehlt" in titles()

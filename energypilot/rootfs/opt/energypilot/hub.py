@@ -7,7 +7,7 @@ import hashlib
 import logging
 import time
 from collections import defaultdict, deque
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
@@ -24,6 +24,7 @@ _LOGGER = logging.getLogger(__name__)
 ARCHIVE_CHUNK_DAYS = 92
 LIVE_INTERVAL = 15
 FS_INTERVAL = 55 * 60  # Forecast.Solar: once per array and hour
+SOLCAST_DAILY = 10  # calls per day of the free hobbyist account (counted per UTC day)
 PLAN_INTERVAL = 300
 MODE_LABEL = {"normal": "Eigenverbrauch", "hold": "Akku halten", "charge": "Aus dem Netz laden"}
 GEOMETRY_KEYS = ("planes", "efficiency", "ac_max_kw")
@@ -327,19 +328,33 @@ class Hub:
         local = datetime.fromtimestamp(now, self.tz)
         slot = local.strftime("%Y-%m-%d-%H")
         asked, errors, count = False, [], 0
+        # the calls of today are counted in the database: restarts and updates must not use up the
+        # 10 calls a day (Solcast counts per UTC day)
+        utc_day = datetime.fromtimestamp(now, UTC).strftime("%Y-%m-%d")
+        counted_day, _, counted = (self.db.get_meta("sc_calls") or "").partition(":")
+        used = int(counted) if counted_day == utc_day and counted.isdigit() else 0
         for cfg, _arr in arrays:
             if not key or not cfg.get("solcast_id"):
                 continue
-            # at the chosen hours; a new site or key (and the first run) right away, never twice an hour
+            # at the chosen hours; only a new site or key right away - never twice an hour, and a
+            # restart does not count as new: the last call is remembered in the database
             site = f"{cfg['solcast_id']}:{hashlib.sha256(key.encode()).hexdigest()[:12]}"
-            last = self._solcast_done.get(site)
+            last = self._solcast_done.get(site) or self.db.get_meta(f"sc_done:{site}")
             if last == slot or (last and local.hour not in src["solcast_hours"]):
                 continue
+            if used >= SOLCAST_DAILY:
+                continue  # used up for today - the last forecast stays in use
             self._solcast_done[site] = slot
+            self.db.set_meta(f"sc_done:{site}", slot)
+            used += 1
+            self.db.set_meta("sc_calls", f"{utc_day}:{used}")
             asked = True
             try:
                 hours = await solcast.fetch(self.session, key, cfg["solcast_id"])
             except SourceError as err:
+                if err.status == 429:  # Solcast says the day is used up: do not try again before tomorrow
+                    used = SOLCAST_DAILY
+                    self.db.set_meta("sc_calls", f"{utc_day}:{used}")
                 errors.append(f"{cfg['name']}: {err}")
                 continue
             self.db.put_forecast(self._direct_rows("sc", cfg["id"], hours, now))

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.7
+
+- Behoben (Solcast): Nach jedem Neustart oder Update rief EnergyPilot Solcast sofort für jede Anlage ab – mehrere Updates an einem Tag verbrauchten so die 10 Abrufe des kostenlosen Zugangs. Der letzte Abruf wird jetzt in der Datenbank gemerkt; nach einem Neustart geht es erst zur nächsten eingestellten Abrufzeit weiter. Nur ein neuer Schlüssel oder eine neue Resource-ID wird weiterhin sofort abgerufen
+- Solcast: EnergyPilot zählt die Abrufe des Tages mit und hört bei 10 auf. Meldet Solcast selbst „Limit erreicht“, wird an diesem Tag nicht weiter probiert
+- Einrichtung: Ein erreichtes Tageslimit erscheint als Info („Solcast: Tageslimit erreicht“ mit der Uhrzeit, ab der es wieder frei ist) statt als Warnung „Abruf fehlgeschlagen“ – die letzte Prognose wird so lange weiter verwendet
+
 ## 0.11.6
 
 Aus der Durchsicht von Design und Animationen auf allen Seiten:

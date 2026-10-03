@@ -345,6 +345,18 @@ async def run(hub: Hub) -> dict:
             # after a restart the status is new - the stored forecasts know when the source last delivered
             issued = {src: last for src, _n, _first, last in hub.db.forecast_sources()}
             last = stt.get("last_ok") or issued.get(key) or None
+            if key == "sc" and "Abruflimit" in stt.get("text", ""):
+                # the day's calls are used up - not a fault, it continues by itself after midnight UTC
+                midnight = int(now) // 86400 * 86400  # UTC
+                used = f"Die letzte Prognose{f' von {datetime.fromtimestamp(last, hub.tz):%d.%m. %H:%M} Uhr' if last else ''} wird weiter verwendet"
+                if stt.get("at", 0) >= midnight:
+                    fc.append(_c("info", "Solcast: Tageslimit erreicht",
+                                 f"Der kostenlose Zugang erlaubt 10 Abrufe am Tag. {used}; "
+                                 f"ab {datetime.fromtimestamp(midnight + 86400, hub.tz):%H:%M} Uhr ist das Limit wieder frei."))
+                else:
+                    fc.append(_c("info", "Solcast: wartet auf die nächste Abrufzeit",
+                                 f"Gestern war das Tageslimit erreicht. {used}."))
+                continue
             if last and now - last < 3 * 3600:  # a short outage: the last forecast is still in use
                 fc.append(_c("info", f"{source_label(key)}: gerade nicht abrufbar",
                              f"{stt.get('text', '')} – die Prognose von {datetime.fromtimestamp(last, hub.tz):%H:%M} Uhr wird weiter verwendet."))
